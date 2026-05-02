@@ -1,118 +1,273 @@
-# XAUUSD OI Trading Framework — Automation Scripts
+# XAUUSD OI Trading Framework
 
-## Quick Start
+Automated XAUUSD options-driven trading assistant. Scrapes CME open interest and implied volatility data, calculates standard deviation zones, generates Pine Script indicators, pushes them to TradingView Desktop, fires Discord alerts on zone entry, and stores session history in Supabase — all driven by a FastAPI server with a live HTML dashboard.
+
+---
+
+## How It Works
+
+| Phase | Time (UTC+7) | What happens |
+|---|---|---|
+| **Phase 1** | 01:30 Mon–Fri | Scrapes investing.com open price + CME Vol2Vol EOD IV → calculates ±1/2/3SD zones → injects Pine Script into TradingView → sends Discord alert |
+| **Phase 2** | 08:30 Mon–Fri | Scrapes CME intraday OI bars → calculates call/put skew, magnets, gamma levels → updates Pine Script → sends Discord alert |
+| **Price polling** | Every 15s | Reads live price from TradingView Desktop via CDP → computes signal → broadcasts to dashboard via WebSocket → fires zone/recovery alerts |
+
+---
+
+## Prerequisites
+
+- **Python 3.11+**
+- **TradingView Desktop** (the macOS/Windows app — not the browser)
+- **Supabase account** (free tier works) — optional but recommended
+- **Discord server** with a webhook — optional
+
+---
+
+## Installation
+
+### 1. Clone and install
 
 ```bash
-# 1. Install dependencies
+git clone https://github.com/bodytaylor/xauusd-automation.git
+cd xauusd-automation
 pip install -r requirements.txt
-
-# 2. Install Playwright browser
 python -m playwright install chromium
+```
 
-# 3. Run Phase 1 manually (open price + IV → SD zones)
+### 2. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and fill in your values:
+
+```ini
+# Discord webhook (Server Settings → Integrations → Webhooks)
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN
+
+# Supabase (Project Settings → API)
+SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_SERVICE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+# TradingView Desktop CDP port (default 9222)
+TV_CDP_PORT=9222
+```
+
+Discord and Supabase are both optional — the server runs without them, alerts and history are just skipped.
+
+### 3. Set up Supabase schema (if using Supabase)
+
+Open the Supabase SQL editor for your project and run the contents of:
+
+```
+migrations/001_initial_schema.sql
+```
+
+This creates the `sessions` and `signals` tables.
+
+### 4. Set up CME session (first run only)
+
+The CME Vol2Vol scraper needs a saved browser session to bypass login:
+
+```bash
+python login_setup.py
+```
+
+A Chromium browser window opens. Log in to CME Group manually, then press Enter in the terminal. The session cookies are saved to `cme_session.json`.
+
+### 5. Launch TradingView Desktop with CDP enabled
+
+```bash
+open -a "TradingView" --args --remote-debugging-port=9222
+```
+
+Open a XAUUSD chart in TradingView and keep the app running. The server connects to it via Chrome DevTools Protocol on port 9222.
+
+To verify CDP is working:
+
+```bash
+curl http://localhost:9222/json
+```
+
+You should see a JSON list containing a tab with `"url": "https://www.tradingview.com/..."`.
+
+---
+
+## Running the Server
+
+```bash
+python server.py
+```
+
+The server starts on `http://localhost:8000`. On startup it logs:
+
+```
+01:23:45  INFO     Server started. Dashboard → http://localhost:8000
+01:23:45  INFO     TradingView CDP: CONNECTED
+01:23:45  INFO       Scheduled: Phase 1 — Open price + IV  next=2026-05-05 01:30:00+07:00
+01:23:45  INFO       Scheduled: Phase 2 — OI sentiment     next=2026-05-05 08:30:00+07:00
+```
+
+Open `http://localhost:8000` to see the live dashboard.
+
+---
+
+## Dashboard
+
+Three-panel dark dashboard served at `http://localhost:8000`:
+
+- **Left — Zone Map:** Visual ±3SD ladder with live price dot, OI magnet lines
+- **Center — Signal:** Current direction (LONG / SHORT / WAIT), confidence, entry / TP1 / TP2 / SL, recovery banner
+- **Right — OI Analysis:** Call/put skew verdict, percentage gauges, magnet prices, gamma risk levels
+- **Bottom bar:** Live price, TradingView connection status, last update time, Pine Script export link
+
+The dashboard updates every 15 seconds via WebSocket and reconnects automatically if the connection drops.
+
+---
+
+## API Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/session` | Current session data (open price, SD zones, OI analysis) |
+| `GET` | `/api/signal` | Current signal computed from live TradingView price |
+| `GET` | `/api/history?n=30` | Last N sessions from Supabase |
+| `POST` | `/api/refresh/phase1` | Trigger Phase 1 manually (runs in background) |
+| `POST` | `/api/refresh/phase2` | Trigger Phase 2 manually (runs in background) |
+| `WS` | `/ws/price` | WebSocket — broadcasts price/signal/zone every 15s |
+
+---
+
+## Running Phases Manually
+
+Without the scheduler, you can run each phase independently:
+
+```bash
+# Phase 1 — open price + IV + SD zones
 python collector.py
 
-# 4. Run Phase 2 manually (OI sentiment at 08:30)
+# Phase 2 — OI sentiment
 python oi_collector.py
+```
 
-# 5. Or run the scheduler (auto-fires at correct times)
-pip install apscheduler
-python scheduler.py
+Or trigger via API while the server is running:
+
+```bash
+curl -X POST http://localhost:8000/api/refresh/phase1
+curl -X POST http://localhost:8000/api/refresh/phase2
 ```
 
 ---
 
-## Files
+## Signal Logic
 
-| File | Purpose |
-|---|---|
-| `collector.py` | Phase 1 — scrapes investing.com open price + CME IV, calculates SD zones |
-| `oi_collector.py` | Phase 2 — scrapes CME intraday OI, skew, magnets, gamma levels |
-| `scheduler.py` | Runs both on a cron-like schedule (01:30 + 08:30 UTC+7) |
-| `session_data.json` | Output — consumed by the trading dashboard HTML |
-| `screenshots/` | Auto-saved screenshots for debugging |
+| Zone | Distance from open | Signal |
+|---|---|---|
+| INSIDE_1SD | < 1SD | WAIT |
+| ±2SD | 1SD – 2SD | Fade (SHORT if above, LONG if below) |
+| ±3SD | 2SD – 3SD | Fade with confidence scoring |
+| BEYOND_3SD + 25pt | > 3SD + 25pt | Recovery — follow trend |
+
+**Box grid:** 50-point entries. SHORT: entry = ceil(price/50)×50, TP1=−25pt, TP2=−50pt, SL=+25pt. LONG: entry = floor(price/50)×50, TP1=+25pt, TP2=+50pt, SL=−25pt.
+
+**Confidence HIGH** requires: price at 3SD + OI skew confirms direction + magnet target exists closer to open than current price.
 
 ---
 
-## Output: session_data.json
+## Discord Alerts
 
-```json
-{
-  "locked_at": "2025-01-15T01:30:00+07:00",
-  "open_price": 3250.00,
-  "iv_pct": 16.0,
-  "sd_zones": {
-    "daily_pct": 1.0000,
-    "sd1_pts": 32.50,
-    "sd2_pts": 65.00,
-    "sd3_pts": 97.50,
-    "zones": {
-      "+3SD": 3347.50,
-      "+2SD": 3315.00,
-      "+1SD": 3282.50,
-      "OPEN": 3250.00,
-      "-1SD": 3217.50,
-      "-2SD": 3185.00,
-      "-3SD": 3152.50
-    }
-  },
-  "oi_data": [...],
-  "oi_analysis": {
-    "call_pct": 52.0,
-    "put_pct": 48.0,
-    "skew_verdict": "Neutral",
-    "magnets": [3200, 3300],
-    "gamma_levels": [{"strike": 3150, "type": "put", "delta": 0.02}]
-  }
-}
+Six alert types sent to your webhook:
+
+| Alert | Trigger | Color |
+|---|---|---|
+| Phase 1 Complete | Phase 1 finishes | Green |
+| Phase 2 Complete | Phase 2 finishes | Blue |
+| Zone Alert | Price enters ±2SD or ±3SD | Amber / Red |
+| Recovery Signal | Price breaks 3SD+25pt | Red |
+| Gamma Risk | Price within 10pt of gamma level | Orange |
+| Phase Failed | Collector subprocess exits non-zero | Red |
+
+Each alert fires at most once per trading day (reset at midnight UTC+7).
+
+---
+
+## Pine Script
+
+After each phase, a Pine Script v5 indicator is generated and injected into TradingView Desktop:
+
+- **Phase 1:** SD zone backgrounds, ±1/2/3SD `hline()` levels, 50-point box grid
+- **Phase 2:** Adds OI magnet `hline()` levels in blue
+
+The `.pine` files are also saved to `exports/session_YYYY-MM-DD.pine` and linked from the dashboard bottom bar.
+
+---
+
+## Project Structure
+
+```
+xauusd-automation/
+├── collector.py          # Phase 1 — investing.com + CME EOD IV scraper
+├── oi_collector.py       # Phase 2 — CME intraday OI scraper
+├── server.py             # FastAPI server (scheduler + WebSocket + REST)
+├── signal_engine.py      # Box trading signal logic
+├── pine_exporter.py      # Pine Script v5 generator
+├── tradingview_client.py # TradingView Desktop CDP client
+├── alerts.py             # Discord webhook dispatcher
+├── db_sync.py            # Supabase persistence (sessions + signals)
+├── config.py             # Settings from .env
+├── scheduler.py          # Legacy standalone scheduler (pre-server)
+├── login_setup.py        # CME session cookie saver
+├── dashboard/            # HTML/CSS/JS live dashboard
+│   ├── index.html
+│   ├── style.css
+│   └── app.js
+├── exports/              # Generated .pine files (gitignored)
+├── logs/                 # Log files (gitignored)
+├── migrations/
+│   └── 001_initial_schema.sql   # Supabase table definitions
+├── tests/                # pytest test suite (39 tests)
+├── .env.example          # Environment variable template
+├── requirements.txt
+└── pytest.ini
 ```
 
 ---
 
-## Schedule
+## Running Tests
 
-| Phase | Time (UTC+7) | Time (UTC) | Script |
-|---|---|---|---|
-| Phase 1 | 01:30 Mon–Fri | 18:30 Sun–Thu | `collector.py` |
-| Phase 2 | 08:30 Mon–Fri | 01:30 Mon–Fri | `oi_collector.py` |
+```bash
+pytest tests/ -v
+```
+
+Expected: 39 tests, all passing.
 
 ---
 
 ## Troubleshooting
 
-**Bot detection / 403 errors**
-- Set `HEADLESS = False` in the script (already default)
-- The visible browser helps bypass fingerprinting
-- If still blocked: manually navigate to the site, solve any CAPTCHA, then re-run
+**TradingView CDP not connecting**
+- Verify TradingView Desktop was launched with `--remote-debugging-port=9222`
+- Run `curl http://localhost:9222/json` — you should see a JSON list with a tradingview.com URL
+- Only TradingView Desktop supports CDP; the browser version does not
 
-**CME auto-extraction fails**
-- The CME Vol2Vol tool is JavaScript-heavy; selectors may shift
-- The script falls back to manual CLI input automatically
-- Check `screenshots/` to see exactly what the browser is seeing
+**CME scraper fails / bot detection**
+- Run `python login_setup.py` again to refresh the saved session
+- Check `screenshots/` to see what the browser was seeing when it failed
+- The scraper falls back to manual CLI input if auto-extraction fails
 
 **investing.com layout changes**
-- Edit the `strategies` list in `fetch_open_price()` — add new selectors at the top
-- Use browser DevTools (F12) to find the current element's class or data-test attribute
+- Edit the `strategies` list in `fetch_open_price()` inside `collector.py`
+- Use browser DevTools (F12) to find the updated element selector
 
----
+**Phase 2 OI bars not found**
+- CME Vol2Vol is JavaScript-heavy; the scraper may need selector updates
+- Check `screenshots/` for the last known browser state
 
-## Cron Setup (Linux/macOS)
+**Discord alerts not sending**
+- Verify `DISCORD_WEBHOOK_URL` in `.env` is the full webhook URL
+- Test directly: `curl -X POST $DISCORD_WEBHOOK_URL -H "Content-Type: application/json" -d '{"content":"test"}'`
 
-```bash
-crontab -e
-```
-
-Add these lines:
-```
-# XAUUSD Phase 1 — 01:30 UTC+7 = 18:30 UTC (prev day)
-30 18 * * 0-4  cd /path/to/xauusd_automation && python3 collector.py >> logs/phase1.log 2>&1
-
-# XAUUSD Phase 2 — 08:30 UTC+7 = 01:30 UTC
-30  1 * * 1-5  cd /path/to/xauusd_automation && python3 oi_collector.py >> logs/phase2.log 2>&1
-```
-
-## Windows Task Scheduler
-
-- Action: `python C:\path\to\collector.py`
-- Trigger: Daily at 18:30 UTC (adjust for your timezone offset)
-- Repeat for `oi_collector.py` at 01:30 UTC
+**Supabase upsert failing**
+- Ensure `migrations/001_initial_schema.sql` has been run in the Supabase SQL editor
+- Verify `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` (use the **service role** key, not the anon key)
