@@ -1,0 +1,29 @@
+# Secrets
+.env
+
+# CME browser session (contains auth cookies — never commit)
+cme_session.json
+browser_profile/
+
+# Runtime outputs
+session_data.json
+screenshots/
+exports/
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/

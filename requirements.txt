@@ -1,0 +1,2 @@
+playwright>=1.44.0
+apscheduler>=3.10.0
