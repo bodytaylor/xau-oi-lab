@@ -158,7 +158,7 @@ function renderSignal(sig) {
   if (!sig) return;
   const zone  = sig.zone || '—';
   const dir   = sig.direction || 'WAIT';
-  const conf  = sig.confidence || '';
+  const conf  = sig.confidence || '—';
 
   document.getElementById('zone-badge').textContent      = zone;
   document.getElementById('direction-badge').textContent  = dir;
