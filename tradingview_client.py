@@ -121,7 +121,11 @@ class TradingViewClient:
         try:
             ws_url = self._get_tv_ws_url()
             ws = websocket.create_connection(ws_url, timeout=10)
+        except Exception as e:
+            log.warning(f"push_pine: {e}")
+            return False
 
+        try:
             # Step 1: set editor source via Monaco API
             code_json = json.dumps(code)
             js_set = _JS_SET_PINE_TEMPLATE.format(code_json=code_json)
@@ -135,7 +139,6 @@ class TradingViewClient:
 
             if val != "ok":
                 log.warning(f"push_pine: Monaco returned '{val}'")
-                ws.close()
                 return False
 
             # Step 2: click compile / add-to-chart button
@@ -145,13 +148,15 @@ class TradingViewClient:
                 "params": {"expression": _JS_COMPILE, "returnByValue": True},
             }))
             ws.recv()
-            ws.close()
             log.info("Pine Script injected and compiled ✓")
             return True
 
         except Exception as e:
             log.warning(f"push_pine: {e}")
             return False
+
+        finally:
+            ws.close()
 
     def create_sd_alerts(self, sd_zones: dict) -> int:
         """
