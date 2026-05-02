@@ -14,12 +14,61 @@ Automated XAUUSD options-driven trading assistant. Scrapes CME open interest and
 
 ---
 
-## Prerequisites
+## System Requirements
 
-- **Python 3.11+**
-- **TradingView Desktop** (the macOS/Windows app — not the browser)
-- **Supabase account** (free tier works) — optional but recommended
-- **Discord server** with a webhook — optional
+### Operating System
+
+| OS | Support |
+|---|---|
+| macOS | Fully supported |
+| Windows | Fully supported |
+| Linux | Supported with workaround — see note below |
+
+> **Linux note:** TradingView Desktop does not have a Linux release. Substitute it with Chromium or Chrome launched with CDP enabled:
+> ```bash
+> chromium-browser --remote-debugging-port=9222 https://www.tradingview.com/chart/
+> ```
+> Open a XAUUSD chart, verify with `curl http://localhost:9222/json`, and the rest of the project works identically.
+
+---
+
+### Runtime
+
+| Requirement | Version | Notes |
+|---|---|---|
+| Python | 3.11 or higher | Required |
+| pip | Any current version | For installing dependencies |
+| Chromium or Chrome | Any current version | Used by Playwright for scraping CME and investing.com; installed automatically via `python -m playwright install chromium` |
+
+---
+
+### TradingView
+
+- **TradingView Desktop** (macOS / Windows) — or any Chromium/Chrome instance on Linux — must be running with the Chrome DevTools Protocol enabled on port 9222 (configurable via `TV_CDP_PORT` in `.env`)
+- A **XAUUSD chart** must be open and visible in TradingView when the server is running
+
+---
+
+### Network
+
+- Outbound HTTPS access to:
+  - `investing.com` — XAUUSD open price (Phase 1)
+  - `cmegroup.com` / `vol2vol.cmegroup.com` — IV and OI data (Phase 1 & 2)
+  - `supabase.co` — session/signal persistence (optional)
+  - `discord.com` — webhook alerts (optional)
+- Local port **8000** — FastAPI server and dashboard
+- Local port **9222** (or `TV_CDP_PORT`) — TradingView CDP
+
+---
+
+### Optional Services
+
+| Service | Purpose | Required |
+|---|---|---|
+| Supabase (free tier) | Stores session history and signals; powers `/api/history` | No |
+| Discord webhook | Zone entry, recovery, and phase-completion alerts | No |
+
+Both services are optional. The server starts and runs without them; alerts and history are silently skipped if credentials are absent.
 
 ---
 
