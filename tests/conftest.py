@@ -1,4 +1,5 @@
 # tests/conftest.py
+import copy
 import pytest
 
 SAMPLE_SESSION = {
@@ -41,4 +42,4 @@ SAMPLE_SESSION = {
 
 @pytest.fixture
 def sample_session():
-    return SAMPLE_SESSION.copy()
+    return copy.deepcopy(SAMPLE_SESSION)
