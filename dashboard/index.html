@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XAUUSD OI Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="main">
+
+  <!-- LEFT: Zone Map -->
+  <div class="panel" id="zone-map-wrap">
+    <h3>Zone Map</h3>
+    <div id="zone-bar"></div>
+  </div>
+
+  <!-- CENTER: Signal -->
+  <div class="panel" id="signal-panel">
+    <h3>Trade Signal</h3>
+    <div id="zone-badge">—</div>
+    <div id="direction-badge">WAIT</div>
+    <div id="confidence">—</div>
+
+    <div class="level-grid">
+      <span class="lbl">Entry</span>  <span class="val" id="val-entry">—</span>
+      <span class="lbl">TP1</span>    <span class="val" id="val-tp1">—</span>
+      <span class="lbl">TP2</span>    <span class="val" id="val-tp2">—</span>
+      <span class="lbl">SL</span>     <span class="val" id="val-sl">—</span>
+    </div>
+
+    <div id="recovery-banner">
+      ⚡ RECOVERY — Cut position, follow trend
+    </div>
+  </div>
+
+  <!-- RIGHT: OI Analysis -->
+  <div class="panel" id="oi-panel">
+    <h3>OI Analysis</h3>
+    <div class="skew" id="skew-text">—</div>
+
+    <div class="gauge-row">
+      <span style="color:var(--blue);width:40px">CALL</span>
+      <div class="gauge-bar"><div class="gauge-fill" id="call-fill" style="background:var(--blue);width:50%"></div></div>
+      <span id="call-pct-text">50%</span>
+    </div>
+    <div class="gauge-row">
+      <span style="color:var(--amber);width:40px">PUT</span>
+      <div class="gauge-bar"><div class="gauge-fill" id="put-fill" style="background:var(--amber);width:50%"></div></div>
+      <span id="put-pct-text">50%</span>
+    </div>
+
+    <h3 style="margin-top:16px">Magnets</h3>
+    <div id="magnet-list"></div>
+
+    <h3 style="margin-top:16px">Gamma Risk</h3>
+    <div id="gamma-list"></div>
+
+    <div style="margin-top:16px;color:var(--muted);font-size:10px" id="phase2-ts">
+      Phase 2: waiting…
+    </div>
+  </div>
+
+</div>
+
+<!-- BOTTOM BAR -->
+<div id="bottom-bar">
+  <div id="live-price">—</div>
+  <span><span class="status-dot dot-grey" id="ws-dot"></span>TradingView</span>
+  <span id="ts-label" style="color:var(--muted)">—</span>
+  <a id="pine-link" href="#" target="_blank">📄 Pine Script</a>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

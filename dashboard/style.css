@@ -1,0 +1,185 @@
+/* dashboard/style.css */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #0d0d0d;
+  --panel:    #161616;
+  --border:   #2a2a2a;
+  --text:     #e0e0e0;
+  --muted:    #666;
+  --green:    #00c853;
+  --red:      #ff1744;
+  --amber:    #ff9100;
+  --blue:     #2979ff;
+  --grey:     #424242;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'SF Mono', 'Consolas', monospace;
+  font-size: 13px;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  overflow: hidden;
+}
+
+#main {
+  display: grid;
+  grid-template-columns: 180px 1fr 220px;
+  gap: 1px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.panel {
+  background: var(--panel);
+  padding: 16px;
+  overflow-y: auto;
+}
+
+h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 12px; }
+
+/* ── Zone Map (left panel) ─────────────────────────────── */
+#zone-map-wrap {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+#zone-bar {
+  position: relative;
+  flex: 1;
+  min-height: 400px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: visible;
+}
+
+.zone-band {
+  position: absolute;
+  left: 0; right: 0;
+  display: flex;
+  align-items: center;
+  padding-left: 4px;
+  font-size: 10px;
+  color: rgba(255,255,255,0.6);
+}
+
+.zone-3 { background: rgba(255,23,68,.15); }
+.zone-2 { background: rgba(255,145,0,.12); }
+.zone-1 { background: rgba(66,66,66,.20); }
+
+.sd-line {
+  position: absolute;
+  left: 0; right: 0;
+  height: 1px;
+  opacity: 0.8;
+}
+
+.price-dot {
+  position: absolute;
+  left: 50%;
+  transform: translate(-50%, 50%);
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 6px #fff;
+  transition: bottom 0.5s ease;
+  z-index: 10;
+}
+
+.level-label {
+  position: absolute;
+  right: 4px;
+  transform: translateY(50%);
+  font-size: 9px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ── Signal panel (center) ────────────────────────────── */
+#signal-panel { text-align: center; }
+
+#zone-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: var(--grey);
+  margin-bottom: 12px;
+}
+
+#direction-badge {
+  font-size: 36px;
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+
+#confidence {
+  font-size: 11px;
+  letter-spacing: 2px;
+  margin-bottom: 20px;
+  color: var(--muted);
+}
+
+.level-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  text-align: left;
+  margin-bottom: 20px;
+}
+.level-grid .lbl { color: var(--muted); }
+.level-grid .val { font-weight: bold; font-size: 15px; }
+
+#recovery-banner {
+  display: none;
+  background: rgba(255,23,68,.2);
+  border: 1px solid var(--red);
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 11px;
+  color: var(--red);
+  animation: pulse 1.5s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+/* ── OI panel (right) ─────────────────────────────────── */
+#oi-panel .skew { font-size: 16px; font-weight: bold; margin-bottom: 12px; }
+
+.gauge-row { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; font-size: 11px; }
+.gauge-bar  { flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.gauge-fill { height: 100%; border-radius: 4px; transition: width .5s; }
+
+.magnet-row { padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.gamma-row  { color: var(--amber); padding: 4px 0; font-size: 11px; }
+
+/* ── Bottom bar ───────────────────────────────────────── */
+#bottom-bar {
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  font-size: 12px;
+}
+
+#live-price { font-size: 28px; font-weight: bold; min-width: 100px; }
+
+.status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 4px;
+}
+.dot-green  { background: var(--green); box-shadow: 0 0 4px var(--green); }
+.dot-amber  { background: var(--amber); }
+.dot-grey   { background: var(--grey); }
+
+#pine-link { margin-left: auto; color: var(--blue); text-decoration: none; font-size: 11px; }
+#pine-link:hover { text-decoration: underline; }
