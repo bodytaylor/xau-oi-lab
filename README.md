@@ -127,9 +127,21 @@ A Chromium browser window opens. Log in to CME Group manually, then press Enter 
 
 ### 5. Launch TradingView Desktop with CDP enabled
 
+Use the included helper script (macOS):
+
 ```bash
-open -a "TradingView" --args --remote-debugging-port=9222
+bash launch_tradingview.sh
 ```
+
+This kills any existing TradingView process and relaunches it with both required flags:
+
+```bash
+/Applications/TradingView.app/Contents/MacOS/TradingView \
+  --remote-debugging-port=9222 \
+  --remote-allow-origins=* &
+```
+
+> **Important:** Both flags are required. `--remote-debugging-port=9222` opens the CDP port; `--remote-allow-origins=*` allows WebSocket connections to it. Without the second flag, `push_pine()` will silently fail with a 403 error every time.
 
 Open a XAUUSD chart in TradingView and keep the app running. The server connects to it via Chrome DevTools Protocol on port 9222.
 
@@ -140,6 +152,14 @@ curl http://localhost:9222/json
 ```
 
 You should see a JSON list containing a tab with `"url": "https://www.tradingview.com/..."`.
+
+To verify the WebSocket connection specifically (tests that `push_pine()` can connect):
+
+```bash
+python3 -c "from tradingview_client import TradingViewClient; tv = TradingViewClient(); print('CDP:', tv.is_connected()); print('Quote:', tv.get_quote())"
+```
+
+If `get_quote()` returns `None`, TradingView was launched without `--remote-allow-origins=*`. Quit and relaunch with the full command above.
 
 ---
 
@@ -250,6 +270,30 @@ After each phase, a Pine Script v5 indicator is generated and injected into Trad
 
 The `.pine` files are also saved to `exports/session_YYYY-MM-DD.pine` and linked from the dashboard bottom bar.
 
+### Manual push
+
+To push a Pine Script file to TradingView without running the full server:
+
+```bash
+# Push today's session file (exports/session_YYYY-MM-DD.pine)
+python push_pine.py
+
+# Push the most recently generated file regardless of date
+python push_pine.py --latest
+
+# Push a specific file
+python push_pine.py --file exports/session_2026-05-03.pine
+```
+
+`push_pine.py` automates the full sequence over CDP:
+
+1. Opens the Pine Script Editor panel (`data-name="pine-dialog-button"`)
+2. Renames the script to **"OI data"** via the title-button menu
+3. Injects the Pine Script code into Monaco — using `model.setValue()` reached through TradingView's webpack module registry (`window.webpackChunktradingview`) to bypass Monaco's auto-indent pipeline entirely
+4. Clicks **Add to Chart** (`data-qa-id="add-script-to-chart"`)
+
+> **Note:** TradingView must be running with CDP enabled (`bash launch_tradingview.sh`) and a XAUUSD chart must be open before running `push_pine.py`.
+
 ---
 
 ## Project Structure
@@ -261,7 +305,9 @@ xauusd-automation/
 ├── server.py             # FastAPI server (scheduler + WebSocket + REST)
 ├── signal_engine.py      # Box trading signal logic
 ├── pine_exporter.py      # Pine Script v5 generator
-├── tradingview_client.py # TradingView Desktop CDP client
+├── tradingview_client.py # TradingView Desktop CDP client (push_pine, rename, open editor)
+├── push_pine.py          # CLI: push today's / latest .pine file to TradingView
+├── launch_tradingview.sh # macOS helper: relaunch TradingView with CDP on port 9222
 ├── alerts.py             # Discord webhook dispatcher
 ├── db_sync.py            # Supabase persistence (sessions + signals)
 ├── config.py             # Settings from .env
@@ -295,10 +341,23 @@ Expected: 39 tests, all passing.
 
 ## Troubleshooting
 
-**TradingView CDP not connecting**
-- Verify TradingView Desktop was launched with `--remote-debugging-port=9222`
+**TradingView CDP not connecting / Pine Script not appearing after Phase 1**
+- TradingView Desktop must be launched with **both** flags: `--remote-debugging-port=9222 --remote-allow-origins=*`
+- The easiest way: `bash launch_tradingview.sh` — this handles stopping and relaunching with the correct flags
+- Without `--remote-allow-origins=*`, the WebSocket connection is rejected with 403 Forbidden — `push_pine()` returns False silently and no indicator appears
 - Run `curl http://localhost:9222/json` — you should see a JSON list with a tradingview.com URL
+- Test the full connection: `python3 -c "from tradingview_client import TradingViewClient; tv = TradingViewClient(); print(tv.get_quote())"`
+  - If this returns `None`, relaunch TradingView with the correct flags
 - Only TradingView Desktop supports CDP; the browser version does not
+
+**Pine Script injected but indentation is wrong / "line continuation" errors in TradingView**
+- This was caused by `execCommand('insertText')` routing through Monaco's typing pipeline, which applies `autoIndent: "full"` after every newline — snowballing the indentation with each line inside `if` blocks
+- Fixed in `tradingview_client.py`: the injector now calls `model.setValue()` via Monaco's internal API, reached through TradingView's webpack module registry (`window.webpackChunktradingview`). `setValue()` writes directly to the model with no auto-indent post-processing
+- If TradingView updates and `push_pine()` returns `monaco_module_not_found`, clear `window.__tvMonacoModId` in the browser console — the module ID will be rediscovered automatically on the next run
+
+**Pine Editor opens symbol-search panel instead of compiling**
+- Fixed: the old `_JS_COMPILE` selector `[data-name="add-symbol-button"]` was hitting the watchlist "Add symbol" button
+- Now uses `[data-qa-id="add-script-to-chart"]` which is the Pine Editor toolbar's "Add to Chart" button
 
 **CME scraper fails / bot detection**
 - Run `python login_setup.py` again to refresh the saved session

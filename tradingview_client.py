@@ -24,40 +24,139 @@ log = logging.getLogger("tv_client")
 _JS_GET_PRICE = """
 (() => {
     const selectors = [
+        '[class*="price-"]',
+        '[class*="valueValue-"]',
+        '[class*="lastPrice"]',
+        '[class*="inner-"]',
         '[data-name="legend-series-item-price"]',
         '.js-symbol-last',
-        '[class*="lastPrice"]',
         '[data-field="last_price"]',
         '.tv-symbol-price-quote__value'
     ];
     for (const sel of selectors) {
-        const el = document.querySelector(sel);
-        const n = parseFloat((el?.textContent || '').replace(/,/g, ''));
-        if (n > 1000) return n;
+        for (const el of document.querySelectorAll(sel)) {
+            const n = parseFloat((el?.textContent || '').replace(/,/g, ''));
+            if (n > 1000) return n;
+        }
     }
     return null;
 })()
 """
 
-# JavaScript that uses Monaco editor API to set Pine Script source.
+# JavaScript that sets Pine Script content via Monaco's model.setValue() API.
+#
+# Why NOT execCommand / Input.insertText:
+#   Both go through Monaco's typing pipeline which applies autoIndent:"full"
+#   after every newline, snowballing the indentation deeper with each line.
+#
+# Solution: reach Monaco's ITextModel.setValue() through TradingView's webpack
+#   module registry (window.webpackChunktradingview).  setValue() writes
+#   directly to the model without any autoIndent post-processing.
+#
+# The Monaco module ID is discovered at runtime by scanning for the module that
+# exposes editor.getModels(), then cached in window.__tvMonacoModId so the
+# scan (≈11 k modules) only runs once per TradingView session.
 _JS_SET_PINE_TEMPLATE = """
 (() => {{
-    const models = typeof monaco !== 'undefined' ? monaco?.editor?.getModels() : null;
-    if (!models || models.length === 0) return 'no_editor';
-    models[0].setValue({code_json});
-    return 'ok';
+    // ── 1. Obtain webpack require ─────────────────────────────────────────
+    let wr = null;
+    const chunk = window.webpackChunktradingview;
+    if (!chunk) return 'no_webpack_chunk';
+    const origPush = chunk.push.bind(chunk);
+    chunk.push = function(c) {{
+        if (Array.isArray(c) && typeof c[2] === 'function') {{
+            const rt = c[2];
+            c[2] = function(__wr) {{ wr = __wr; return rt(__wr); }};
+        }}
+        return origPush(c);
+    }};
+    chunk.push([[Symbol()], {{}}, function(__wr) {{ wr = __wr; }}]);
+    chunk.push = origPush;
+    if (!wr) return 'no_webpack_require';
+
+    // ── 2. Locate the Monaco editor module (cached after first lookup) ────
+    if (!window.__tvMonacoModId) {{
+        for (const id of Object.keys(wr.m || {{}})) {{
+            try {{
+                const m = wr(id);
+                if (m && m.editor && typeof m.editor.getModels === 'function') {{
+                    window.__tvMonacoModId = id;
+                    break;
+                }}
+            }} catch(_) {{}}
+        }}
+    }}
+    if (!window.__tvMonacoModId) return 'monaco_module_not_found';
+
+    const monaco = wr(window.__tvMonacoModId);
+    if (!monaco || !monaco.editor) return 'no_monaco_editor';
+
+    // ── 3. Find the active Pine Script model ─────────────────────────────
+    const models = monaco.editor.getModels();
+    if (!models.length) return 'no_models';
+    const model = models.find(m => m.uri?.path?.endsWith('.pine')) || models[0];
+
+    // ── 4. setValue() — writes directly to model, no autoIndent applied ──
+    model.setValue({code_json});
+    return 'ok:lines=' + model.getLineCount();
 }})()
 """
 
-# JavaScript to click the "Add to chart" / compile button.
+# JavaScript to open (or show) the Pine Script Editor panel.
+_JS_OPEN_PINE_EDITOR = """
+(() => {
+    const btn =
+        document.querySelector('[data-name="pine-dialog-button"]') ||
+        document.querySelector('[aria-label="Pine"]');
+    if (btn) { btn.click(); return 'opened'; }
+    return 'not_found';
+})()
+"""
+
+# JavaScript to click the "Add to chart" button in the Pine Script editor toolbar.
+# data-qa-id="add-script-to-chart" is the stable selector (confirmed via DOM inspection).
+# NOTE: do NOT use [data-name="add-symbol-button"] — that is the watchlist "Add symbol"
+#       button and opens the symbol-search panel instead.
 _JS_COMPILE = """
 (() => {
-    const btn = document.querySelector('[data-name="add-to-chart-button"]') ||
-                document.querySelector('button[class*="addToChart"]') ||
-                document.querySelector('[class*="compileButton"]');
+    const btn = document.querySelector('[data-qa-id="add-script-to-chart"]');
     if (btn) { btn.click(); return 'compiled'; }
     return 'no_compile_btn';
 })()
+"""
+
+# Rename flow — three separate JS snippets called with sleeps between them.
+# Step 1: open the title drop-down menu.
+_JS_RENAME_OPEN_MENU = """
+(() => {
+    const btn = document.querySelector('[data-qa-id="pine-script-title-button"]');
+    if (btn) { btn.click(); return 'opened'; }
+    return 'not_found';
+})()
+"""
+
+# Step 2: click the "Rename…" menu item.
+_JS_RENAME_CLICK = """
+(() => {
+    const item = [...document.querySelectorAll('[role="menuitem"]')]
+                    .find(el => el.textContent.trim().startsWith('Rename'));
+    if (item) { item.click(); return 'clicked'; }
+    return 'not_found';
+})()
+"""
+
+# Step 3: clear the name input, type the new name, click Save.
+_JS_RENAME_TYPE_TEMPLATE = """
+(() => {{
+    const input = document.querySelector('[data-qa-id="ui-lib-Input-input"]');
+    if (!input) return 'no_input';
+    input.focus();
+    input.select();
+    document.execCommand('insertText', false, {name_json});
+    const saveBtn = document.querySelector('[data-qa-id="save-btn"]');
+    if (saveBtn) {{ saveBtn.click(); return 'saved'; }}
+    return 'no_save_btn';
+}})()
 """
 
 # JavaScript to attempt creating a TradingView price alert.
@@ -113,6 +212,88 @@ class TradingViewClient:
             log.debug(f"get_quote: {e}")
             return None
 
+    def open_pine_editor(self) -> bool:
+        """
+        Click the Pine Script Editor tab so the editor panel is visible.
+        Returns True if the button was found and clicked, False otherwise.
+        """
+        try:
+            ws_url = self._get_tv_ws_url()
+            ws = websocket.create_connection(ws_url, timeout=5)
+            ws.send(json.dumps({
+                "id": 1,
+                "method": "Runtime.evaluate",
+                "params": {"expression": _JS_OPEN_PINE_EDITOR, "returnByValue": True},
+            }))
+            result = json.loads(ws.recv())
+            ws.close()
+            val = result.get("result", {}).get("result", {}).get("value")
+            if val == "opened":
+                log.info("Pine Editor panel opened ✓")
+                return True
+            log.warning(f"open_pine_editor: button not found ('{val}')")
+            return False
+        except Exception as e:
+            log.warning(f"open_pine_editor: {e}")
+            return False
+
+    def rename_pine_script(self, name: str) -> bool:
+        """
+        Rename the current Pine Script via the editor's title-button menu.
+        Opens the menu → clicks "Rename…" → types the name → clicks Save.
+        Returns True on success.
+        """
+        import time
+
+        def _eval(ws, id_, expr):
+            ws.send(json.dumps({
+                "id": id_,
+                "method": "Runtime.evaluate",
+                "params": {"expression": expr, "returnByValue": True},
+            }))
+            return json.loads(ws.recv()).get("result", {}).get("result", {}).get("value")
+
+        # Step 1 — open the title drop-down
+        try:
+            ws = websocket.create_connection(self._get_tv_ws_url(), timeout=5)
+            val = _eval(ws, 1, _JS_RENAME_OPEN_MENU)
+            ws.close()
+        except Exception as e:
+            log.warning(f"rename_pine_script step1: {e}")
+            return False
+        if val != "opened":
+            log.warning(f"rename_pine_script: menu open returned '{val}'")
+            return False
+        time.sleep(0.4)
+
+        # Step 2 — click "Rename…"
+        try:
+            ws = websocket.create_connection(self._get_tv_ws_url(), timeout=5)
+            val = _eval(ws, 2, _JS_RENAME_CLICK)
+            ws.close()
+        except Exception as e:
+            log.warning(f"rename_pine_script step2: {e}")
+            return False
+        if val != "clicked":
+            log.warning(f"rename_pine_script: rename click returned '{val}'")
+            return False
+        time.sleep(0.4)
+
+        # Step 3 — type name + click Save
+        try:
+            ws = websocket.create_connection(self._get_tv_ws_url(), timeout=5)
+            js = _JS_RENAME_TYPE_TEMPLATE.format(name_json=json.dumps(name))
+            val = _eval(ws, 3, js)
+            ws.close()
+        except Exception as e:
+            log.warning(f"rename_pine_script step3: {e}")
+            return False
+        if val == "saved":
+            log.info(f"Pine Script renamed to '{name}' ✓")
+            return True
+        log.warning(f"rename_pine_script: save returned '{val}'")
+        return False
+
     def push_pine(self, code: str) -> bool:
         """
         Inject Pine Script into TradingView's Monaco editor and compile it.
@@ -137,7 +318,7 @@ class TradingViewClient:
             result = json.loads(ws.recv())
             val = result.get("result", {}).get("result", {}).get("value")
 
-            if val != "ok":
+            if not (val and str(val).startswith("ok")):
                 log.warning(f"push_pine: Monaco returned '{val}'")
                 return False
 
