@@ -83,29 +83,33 @@ def main():
         )
         sys.exit(1)
 
-    # Brief pause for the panel animation to complete
-    time.sleep(1.5)
+    # Wait for the panel animation to complete before touching the editor
+    time.sleep(2.0)
 
-    # Step 2: rename the script to "OI data"
-    log.info("Step 2: Renaming script to 'OI data'…")
-    renamed = tv.rename_pine_script("OI data")
-    if not renamed:
-        log.warning("Could not rename script — continuing anyway.")
-    time.sleep(0.5)
-
-    # Step 3: paste code + click Add to Chart
-    log.info("Step 3: Injecting Pine Script and clicking Add to Chart…")
+    # Step 2: inject code + click Add to Chart
+    # Rename must come AFTER injection — TradingView refuses to save a script
+    # with an empty editor ("cannot save empty source code").
+    log.info("Step 2: Injecting Pine Script and clicking Add to Chart…")
     code = pine_file.read_text()
     ok = tv.push_pine(code)
 
-    if ok:
-        log.info(f"Done — {pine_file.name} pushed to TradingView ✓")
-    else:
+    if not ok:
         log.error(
             "push_pine failed.\n"
             "Make sure the Pine Editor panel is open and a XAUUSD chart is active."
         )
         sys.exit(1)
+
+    # Wait for Monaco to settle before opening the rename dialog
+    time.sleep(1.5)
+
+    # Step 3: rename the script to "OI data"
+    log.info("Step 3: Renaming script to 'OI data'…")
+    renamed = tv.rename_pine_script("OI data")
+    if not renamed:
+        log.warning("Could not rename script — continuing anyway.")
+
+    log.info(f"Done — {pine_file.name} pushed to TradingView ✓")
 
 
 if __name__ == "__main__":
