@@ -176,10 +176,61 @@ function renderSignal(sig) {
   banner.style.display = sig.recovery ? 'block' : 'none';
 }
 
+// ── Today's Bias ──────────────────────────────────────────────────────────────
+
+function renderBias() {
+  const verdictEl = document.getElementById('bias-verdict');
+  const detailEl  = document.getElementById('bias-detail');
+  if (!verdictEl) return;
+
+  const oi      = session?.oi_analysis;
+  const volSkew = session?.vol_skew_analysis;
+
+  if (!oi) { verdictEl.textContent = 'Waiting…'; return; }
+
+  const oiV  = oi.skew_verdict  || 'Neutral';
+  const volV = volSkew?.verdict || null;
+
+  const oiBear  = oiV.includes('PUT');
+  const oiBull  = oiV.includes('CALL');
+  const volBear = volV?.includes('LEFT');
+  const volBull = volV?.includes('RIGHT');
+
+  let bias = 'NEUTRAL', conf = '', color = 'var(--muted)';
+
+  if      (volBear && oiBear)              { bias = 'BEARISH'; conf = 'HIGH';   color = 'var(--red)';   }
+  else if (volBull && oiBull)              { bias = 'BULLISH'; conf = 'HIGH';   color = 'var(--green)'; }
+  else if (volBear && !oiBull)             { bias = 'BEARISH'; conf = 'MEDIUM'; color = 'var(--red)';   }
+  else if (volBull && !oiBear)             { bias = 'BULLISH'; conf = 'MEDIUM'; color = 'var(--green)'; }
+  else if (oiBear  && !volBull)            { bias = 'BEARISH'; conf = 'LOW';    color = 'var(--amber)'; }
+  else if (oiBull  && !volBear)            { bias = 'BULLISH'; conf = 'LOW';    color = 'var(--amber)'; }
+  else if ((volBear && oiBull) || (volBull && oiBear)) {
+                                             bias = 'CONFLICT'; conf = '';      color = 'var(--amber)'; }
+
+  verdictEl.textContent = conf ? `${bias} · ${conf}` : bias;
+  verdictEl.style.color = color;
+
+  detailEl.innerHTML = '';
+  const lines = [
+    `OI skew  : ${oiV}`,
+    `Vol skew : ${volV || 'not available'}`,
+  ];
+  if (volSkew?.slope_ratio && volV !== null) {
+    lines.push(`L/R ratio : ${volSkew.slope_ratio.toFixed(3)}`);
+  }
+  lines.forEach(txt => {
+    const d = document.createElement('div');
+    d.className = 'bias-detail-row';
+    d.textContent = txt;
+    detailEl.appendChild(d);
+  });
+}
+
 // ── OI Panel ─────────────────────────────────────────────────────────────────
 
 function renderOI() {
   if (!session?.oi_analysis) return;
+  renderBias();
   const oi = session.oi_analysis;
 
   document.getElementById('skew-text').textContent = oi.skew_verdict || '—';

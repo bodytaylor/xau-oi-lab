@@ -148,6 +148,27 @@ h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var
 }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
 
+/* ── Today's Bias ─────────────────────────────────────── */
+#bias-verdict {
+  font-size: 22px;
+  font-weight: bold;
+  margin-bottom: 6px;
+  letter-spacing: 1px;
+}
+
+.bias-detail-row {
+  font-size: 10px;
+  color: var(--muted);
+  padding: 2px 0;
+  font-family: 'SF Mono', 'Consolas', monospace;
+}
+
+.panel-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 14px 0;
+}
+
 /* ── OI panel (right) ─────────────────────────────────── */
 #oi-panel .skew { font-size: 16px; font-weight: bold; margin-bottom: 12px; }
 

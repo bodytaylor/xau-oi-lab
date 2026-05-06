@@ -20,15 +20,18 @@ import websocket
 log = logging.getLogger("tv_client")
 
 # JavaScript injected into TV page to read the current price.
-# Tries multiple selectors in order; returns first value > 1000 (gold is always > 1000).
+# Primary source: the TradingView watchlist panel — the XAUUSD row's price cell
+# is matched by '[class*="price-"]' and reflects the live last-traded price.
+# The watchlist panel MUST be open in TradingView for this to work correctly
+# (see README — TradingView Setup).
+# Fallback: the OHLCV chart legend. Elements appear in O, H, L, C DOM order;
+# we take the LAST value > 1000, which is Close (current price), not Open.
 _JS_GET_PRICE = """
 (() => {
     const selectors = [
         '[class*="price-"]',
         '[class*="valueValue-"]',
         '[class*="lastPrice"]',
-        '[class*="inner-"]',
-        '[data-name="legend-series-item-price"]',
         '.js-symbol-last',
         '[data-field="last_price"]',
         '.tv-symbol-price-quote__value'
@@ -38,6 +41,13 @@ _JS_GET_PRICE = """
             const n = parseFloat((el?.textContent || '').replace(/,/g, ''));
             if (n > 1000) return n;
         }
+    }
+    // OHLCV legend fallback: take the last value (Close), not the first (Open).
+    const legendPrices = [...document.querySelectorAll('[data-name="legend-series-item-price"]')]
+        .map(el => parseFloat((el?.textContent || '').replace(/,/g, '')))
+        .filter(n => n > 1000);
+    if (legendPrices.length > 0) {
+        return legendPrices[legendPrices.length - 1];
     }
     return null;
 })()
@@ -91,10 +101,22 @@ _JS_SET_PINE_TEMPLATE = """
     const monaco = wr(window.__tvMonacoModId);
     if (!monaco || !monaco.editor) return 'no_monaco_editor';
 
-    // ── 3. Find the active Pine Script model ─────────────────────────────
-    const models = monaco.editor.getModels();
-    if (!models.length) return 'no_models';
-    const model = models.find(m => m.uri?.path?.endsWith('.pine')) || models[0];
+    // ── 3. Find the active Pine Script editor (visible, not just any model) ─
+    //   getEditors() returns only live editor instances currently mounted in
+    //   the DOM, so the first .pine editor here IS the one the user sees.
+    //   Fall back to getModels() only if no live editor is found.
+    let model = null;
+    const editors = monaco.editor.getEditors ? monaco.editor.getEditors() : [];
+    for (const ed of editors) {{
+        const m = ed.getModel();
+        if (m && m.uri?.path?.endsWith('.pine')) {{ model = m; break; }}
+    }}
+    if (!model) {{
+        // fallback: scan models
+        const models = monaco.editor.getModels();
+        if (!models.length) return 'no_models';
+        model = models.find(m => m.uri?.path?.endsWith('.pine')) || models[0];
+    }}
 
     // ── 4. setValue() — writes directly to model, no autoIndent applied ──
     model.setValue({code_json});
@@ -117,9 +139,20 @@ _JS_OPEN_PINE_EDITOR = """
 # data-qa-id="add-script-to-chart" is the stable selector (confirmed via DOM inspection).
 # NOTE: do NOT use [data-name="add-symbol-button"] — that is the watchlist "Add symbol"
 #       button and opens the symbol-search panel instead.
+#
+# IMPORTANT: scope the search to exclude buttons inside any open dialog/modal.
+# If the indicators search panel is open with a private script highlighted, its
+# "Add to chart" button matches the same qa-id and triggers the
+# "ask the author to publish" error instead.
 _JS_COMPILE = """
 (() => {
-    const btn = document.querySelector('[data-qa-id="add-script-to-chart"]');
+    const candidates = document.querySelectorAll('[data-qa-id="add-script-to-chart"]');
+    // Prefer a button that is NOT inside any dialog/modal overlay
+    const btn = [...candidates].find(b =>
+        !b.closest('[role="dialog"]') &&
+        !b.closest('[data-name="indicators-dialog"]') &&
+        !b.closest('[data-name="screener-dialog"]')
+    ) || candidates[0];
     if (btn) { btn.click(); return 'compiled'; }
     return 'no_compile_btn';
 })()
@@ -321,6 +354,8 @@ class TradingViewClient:
             if not (val and str(val).startswith("ok")):
                 log.warning(f"push_pine: Monaco returned '{val}'")
                 return False
+
+            log.info(f"push_pine: Monaco setValue → {val}")
 
             # Step 2: click compile / add-to-chart button
             ws.send(json.dumps({

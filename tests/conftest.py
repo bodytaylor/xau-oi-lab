@@ -37,6 +37,15 @@ SAMPLE_SESSION = {
         "magnets": [4700.0, 4500.0],
         "gamma_levels": [{"strike": 4650.0, "type": "call", "delta": 0.04}],
     },
+    "vol_skew_analysis": {
+        "atm_strike": 4625.0,
+        "atm_iv": 28.4,
+        "left_slope": 0.0012,
+        "right_slope": 0.0008,
+        "slope_ratio": 1.5,
+        "verdict": "LEFT heavy — bearish vol skew",
+        "point_count": 8,
+    },
 }
 
 

@@ -46,6 +46,9 @@ Automated XAUUSD options-driven trading assistant. Scrapes CME open interest and
 
 - **TradingView Desktop** (macOS / Windows) — or any Chromium/Chrome instance on Linux — must be running with the Chrome DevTools Protocol enabled on port 9222 (configurable via `TV_CDP_PORT` in `.env`)
 - A **XAUUSD chart** must be open and visible in TradingView when the server is running
+- The **Watchlist panel must be open** and XAUUSD must be listed in it — the live price is read from the watchlist's price cell via CDP. If the watchlist is closed or XAUUSD is not in it, price polling will fall back to the chart's OHLCV legend (less reliable) or return `None`
+
+> **Watchlist setup:** Open the watchlist panel (default left sidebar in TradingView Desktop). Add XAUUSD if it is not already listed. Keep the panel open while the server is running. Do not collapse or hide it.
 
 ---
 
@@ -340,6 +343,13 @@ Expected: 39 tests, all passing.
 ---
 
 ## Troubleshooting
+
+**Dashboard shows wrong price / price does not update**
+- The live price is read from the **TradingView watchlist panel** price cell
+- Ensure the watchlist panel is **open** (not collapsed) in TradingView Desktop
+- Ensure **XAUUSD is listed** in the watchlist — add it if missing
+- If another symbol sits above XAUUSD in the watchlist and its price is also > 1000, the scraper will return that symbol's price instead; move XAUUSD to the top of the watchlist or remove other symbols with prices above 1000
+- Verify with: `python3 -c "from tradingview_client import TradingViewClient; print(TradingViewClient().get_quote())"`
 
 **TradingView CDP not connecting / Pine Script not appearing after Phase 1**
 - TradingView Desktop must be launched with **both** flags: `--remote-debugging-port=9222 --remote-allow-origins=*`

@@ -19,6 +19,7 @@ import json, re, sys, logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+from utils import utc7_now, target_exp_date
 
 BASE_DIR       = Path(__file__).parent
 OUTPUT_FILE    = BASE_DIR / "session_data.json"
@@ -46,9 +47,6 @@ logging.basicConfig(
 )
 log = logging.getLogger("collector")
 
-
-def utc7_now():
-    return datetime.now(timezone(timedelta(hours=7)))
 
 
 def ss(page, name):
@@ -333,45 +331,54 @@ def _select_gold_via_ui(frame, page):
 
 def _select_today_expiration(frame, page):
     """
-    Verify the expiration is already set to today's contract (e.g. OG1K6).
-    After navigating the iframe to pid=40 (Gold), the tool defaults to the nearest
-    expiration automatically — this is the correct 'today' value and should be kept.
-    Only opens the popup to pick the first link if no expiration is currently shown.
+    Select the expiration matching today's date (or last Friday on weekends).
+    Date format in the popup is 'dd MMM yyyy' (e.g. '06 May 2026').
+    Always opens the popup — the site auto-selects Friday's contract, which is wrong
+    on days when a same-day expiry exists.
     """
+    target = target_exp_date()
+    log.info(f"Target expiration date: {target}")
     try:
-        exp_text = frame.evaluate("""() => {
-            const el = document.querySelector('#ctl00_ucSelector_hlExpiration');
-            return el ? el.innerText.trim() : null;
-        }""")
-        log.info(f"Current expiration: {exp_text}")
-
-        # Strip the "EXPIRATION:" label and check whether a contract code is present
-        code = ""
-        if exp_text:
-            code = re.sub(r"EXPIRATION\s*:\s*", "", exp_text, flags=re.I).strip()
-
-        if code:
-            # Already set — keep it (this is today's / nearest expiration)
-            log.info(f"Expiration already set to {code} ✓ — keeping")
-            return
-
-        # No expiration shown — open popup and pick the first (nearest) link
-        log.info("No expiration set — opening popup to select nearest...")
         exp_link = frame.locator("#ctl00_ucSelector_hlExpiration").first
+        if exp_link.count() == 0:
+            log.warning("Expiration link not found")
+            return
         exp_link.click(timeout=10000)
         page.wait_for_timeout(1500)
 
-        first_exp = frame.locator(
-            '[id*="lvGroupsExpirations_ctrl0_lvExpirations_ctrl0_lbExpiration"]'
-        ).first
-        if first_exp.count() > 0:
-            exp_label = first_exp.inner_text(timeout=3000).strip()
-            log.info(f"Selecting nearest expiration: {exp_label}")
-            first_exp.click(timeout=10000)
+        # Search for a link whose text contains today's date.
+        # Pass target as an argument to avoid embedding it in a JS string literal.
+        js_fn = """(target) => {
+            const links = document.querySelectorAll('#ctl00_ucSelector_pnlExpirations a');
+            for (const a of links) {
+                if (a.innerText.trim().includes(target)) {
+                    a.click();
+                    return a.innerText.trim();
+                }
+            }
+            return null;
+        }"""
+        found = frame.evaluate(js_fn, target)
+
+        if found:
+            log.info(f"Expiration matched by date '{target}': {found} ✓")
             page.wait_for_timeout(2000)
-            log.info("Nearest expiration selected ✓")
         else:
-            log.warning("First expiration link not found — keeping current expiration")
+            log.warning(f"No expiration found for '{target}' — falling back to first link")
+            first_exp = frame.locator("#ctl00_ucSelector_pnlExpirations a").first
+            if first_exp.count() == 0:
+                # Try legacy selector
+                first_exp = frame.locator(
+                    '[id*="lvGroupsExpirations_ctrl0_lvExpirations_ctrl0_lbExpiration"]'
+                ).first
+            if first_exp.count() > 0:
+                exp_label = first_exp.inner_text(timeout=3000).strip()
+                log.info(f"Selecting fallback expiration: {exp_label}")
+                first_exp.click(timeout=10000)
+                page.wait_for_timeout(2000)
+                log.info("Fallback expiration selected ✓")
+            else:
+                log.warning("No expiration links found in popup")
 
     except Exception as e:
         log.warning(f"_select_today_expiration: {e}")
