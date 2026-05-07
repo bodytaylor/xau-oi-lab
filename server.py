@@ -151,8 +151,8 @@ def run_phase1():
     session = _load_session()
     if not session:
         return
-    pine_code = export_pine(session)
-    tv_client.push_pine(pine_code)
+    export_pine(session)
+    subprocess.run([sys.executable, str(BASE / "push_pine.py"), "--latest"])
     tv_client.create_sd_alerts(session["sd_zones"])
     db_sync.upsert_session(session)
     alerts.phase1_complete(session)
@@ -168,8 +168,8 @@ def run_phase2():
     session = _load_session()
     if not session:
         return
-    pine_code = export_pine(session)
-    tv_client.push_pine(pine_code)
+    export_pine(session)
+    subprocess.run([sys.executable, str(BASE / "push_pine.py"), "--latest"])
     db_sync.upsert_session(session)
     alerts.phase2_complete(session)
     log.info("Phase 2 complete ✓")

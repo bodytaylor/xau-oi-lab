@@ -332,11 +332,10 @@ class TradingViewClient:
         Inject Pine Script into TradingView's Monaco editor and compile it.
         Returns True on success, False if the editor was not found or CDP failed.
 
-        If Monaco has no models loaded (Pine editor panel is closed), the method
-        automatically opens the editor panel and retries once.
+        The Pine Script editor panel must already be open before calling this.
+        Use push_pine.py (which calls open_pine_editor() first) rather than
+        calling this method directly.
         """
-        import time
-
         try:
             ws_url = self._get_tv_ws_url()
             ws = websocket.create_connection(ws_url, timeout=10)
@@ -345,31 +344,16 @@ class TradingViewClient:
             return False
 
         try:
+            # Step 1: set editor source via Monaco API
             code_json = json.dumps(code)
             js_set = _JS_SET_PINE_TEMPLATE.format(code_json=code_json)
-
-            def _try_set(msg_id: int) -> str | None:
-                ws.send(json.dumps({
-                    "id": msg_id,
-                    "method": "Runtime.evaluate",
-                    "params": {"expression": js_set, "returnByValue": True},
-                }))
-                return json.loads(ws.recv()).get("result", {}).get("result", {}).get("value")
-
-            # Step 1: set editor source via Monaco API
-            val = _try_set(1)
-
-            # If no models found, the Pine editor panel is closed — open it and retry
-            if val == "no_models":
-                log.info("push_pine: no Monaco models — opening Pine editor and retrying…")
-                ws.send(json.dumps({
-                    "id": 2,
-                    "method": "Runtime.evaluate",
-                    "params": {"expression": _JS_OPEN_PINE_EDITOR, "returnByValue": True},
-                }))
-                ws.recv()
-                time.sleep(2.0)
-                val = _try_set(3)
+            ws.send(json.dumps({
+                "id": 1,
+                "method": "Runtime.evaluate",
+                "params": {"expression": js_set, "returnByValue": True},
+            }))
+            result = json.loads(ws.recv())
+            val = result.get("result", {}).get("result", {}).get("value")
 
             if not (val and str(val).startswith("ok")):
                 log.warning(f"push_pine: Monaco returned '{val}'")
