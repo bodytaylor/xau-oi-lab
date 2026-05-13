@@ -52,7 +52,8 @@ def generate_pine_script(session: dict) -> str:
             magnet_hlines = "\n".join(parts)
 
     # ── OPEN label info line ──────────────────────────────────────────────
-    open_info = f"{date}  |  IV {iv_pct:.2f}%  ±{sd1_pts:.1f}pt"
+    dte = sd.get("dte", 1.0)
+    open_info = f"{date}  |  IV {iv_pct:.2f}%  DTE {dte}  ±{sd1_pts:.1f}pt"
     if session.get("phase2_complete") and session.get("oi_analysis"):
         skew = session["oi_analysis"].get("skew_verdict", "")
         oi_rows = session.get("oi_data", [])
