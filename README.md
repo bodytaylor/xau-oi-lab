@@ -8,7 +8,7 @@ Automated XAUUSD options-driven trading assistant. Scrapes CME open interest and
 
 | Phase | Time (UTC+7) | What happens |
 |---|---|---|
-| **Phase 1** | 01:30 Mon–Fri | Scrapes investing.com open price + CME Vol2Vol EOD IV → calculates ±1/2/3SD zones → injects Pine Script into TradingView → sends Discord alert |
+| **Phase 1** | 01:30 Mon–Fri | Scrapes investing.com open price + CME Vol2Vol EOD IV + DTE → calculates ±1/2/3SD zones → injects Pine Script into TradingView → sends Discord alert |
 | **Phase 2** | 08:30 Mon–Fri | Scrapes CME intraday OI bars → calculates call/put skew, magnets, gamma levels → updates Pine Script → sends Discord alert |
 | **Price polling** | Every 15s | Reads live price from TradingView Desktop via CDP → computes signal → broadcasts to dashboard via WebSocket → fires zone/recovery alerts |
 
@@ -229,6 +229,29 @@ Or trigger via API while the server is running:
 curl -X POST http://localhost:8000/api/refresh/phase1
 curl -X POST http://localhost:8000/api/refresh/phase2
 ```
+
+---
+
+## SD Zone Calculation
+
+Phase 1 computes symmetric ±1/2/3SD price zones from the open price using CME implied volatility and the option's DTE (Days to Expiration) read from the Vol2Vol chart title bar (e.g. `(0.25 DTE)`).
+
+```
+Daily% = IV% / 16          # annualised → single-day vol (√252 ≈ 16)
+1SD pts = Open × Daily% × DTE
+```
+
+| Field | Example |
+|---|---|
+| Open price | 2350.00 |
+| IV% | 16.00 |
+| DTE | 0.25 |
+| Daily% | 1.00% |
+| 1SD pts | 2350 × 0.01 × 0.25 = **5.88 pts** |
+| +1SD | 2355.88 |
+| −1SD | 2344.12 |
+
+DTE is extracted automatically from the CME title bar. If extraction fails the system falls back to a manual CLI prompt.
 
 ---
 

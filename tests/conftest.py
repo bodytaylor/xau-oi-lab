@@ -8,9 +8,11 @@ SAMPLE_SESSION = {
     "locked_at": "2026-05-02T01:30:00+07:00",
     "open_price": 4621.78,
     "iv_pct": 28.4,
-    "iv_source": {"iv_pct": 28.4, "strike": 4625, "source": "chart_hover"},
+    "dte": 1.0,
+    "iv_source": {"iv_pct": 28.4, "strike": 4625, "source": "chart_hover", "dte": 1.0},
     "sd_zones": {
         "daily_pct": 1.775,
+        "dte": 1.0,
         "sd1_pts": 82.04,
         "sd2_pts": 164.07,
         "sd3_pts": 246.11,

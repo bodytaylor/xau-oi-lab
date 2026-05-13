@@ -214,6 +214,7 @@ def fetch_iv_from_cme(page, open_price: float) -> dict:
     # ── Step D: Extract IV at open_price strike ────────────────────────────
     result = _extract_iv(frame, page, open_price)
     ss(page, "cme_iv_done")
+    result["dte"] = _read_dte(frame)
     return result
 
 
@@ -617,6 +618,35 @@ def _parse_js_chart_data(raw_json: str, open_price: float) -> dict | None:
     return None
 
 
+def _read_dte(frame) -> float | None:
+    """
+    Read DTE from the Vol2Vol chart title bar.
+    Example: 'Gold (OG|GC) G1MK6 (1.28 DTE) vs 4644.5 (+0)' → 1.28
+    """
+    try:
+        title_text = frame.evaluate("""() => {
+            let best = null;
+            for (const el of document.querySelectorAll('*')) {
+                const txt = (el.innerText || '').trim();
+                if (!txt) continue;
+                if (txt.indexOf('DTE') >= 0 && txt.indexOf(' vs ') >= 0 && txt.length < 200) {
+                    if (!best || txt.length < best.length) best = txt;
+                }
+            }
+            return best;
+        }""")
+        if title_text:
+            m = re.search(r'\(([0-9.]+)\s+DTE\)', title_text)
+            if m:
+                dte = float(m.group(1))
+                log.info(f"DTE from title: {dte}  (text: {title_text})")
+                return dte
+        log.warning("DTE not found in chart title bar")
+    except Exception as e:
+        log.debug(f"_read_dte: {e}")
+    return None
+
+
 def _hover_for_tooltip(frame, page, open_price: float) -> dict | None:
     """
     Read the implied volatility at the strike nearest to open_price from the
@@ -760,11 +790,12 @@ def _hover_for_tooltip(frame, page, open_price: float) -> dict | None:
 # STEP 3 — SD Zones
 # ─────────────────────────────────────────────────────────────────────────────
 
-def calc_sd_zones(open_price: float, iv_pct: float) -> dict:
+def calc_sd_zones(open_price: float, iv_pct: float, dte: float) -> dict:
     daily = iv_pct / 16.0
-    sd1   = open_price * (daily / 100.0)
+    sd1   = open_price * (daily / 100.0) * dte
     return {
         "daily_pct": round(daily, 4),
+        "dte":       round(dte, 4),
         "sd1_pts":   round(sd1, 2),
         "sd2_pts":   round(sd1 * 2, 2),
         "sd3_pts":   round(sd1 * 3, 2),
@@ -816,13 +847,17 @@ def main():
         finally:
             ctx2.close()
 
-    sd = calc_sd_zones(open_price, iv_result["iv_pct"])
+    dte = iv_result.get("dte")
+    if dte is None:
+        dte = float(input(">>> Manual — enter DTE (e.g. 0.25): ").strip())
+    sd = calc_sd_zones(open_price, iv_result["iv_pct"], dte)
     payload = {
         "version": "1.2",
         "locked_at": utc7_now().isoformat(),
         "date": utc7_now().strftime("%Y-%m-%d"),
         "open_price": open_price,
         "iv_pct": iv_result["iv_pct"],
+        "dte": dte,
         "iv_source": iv_result,
         "sd_zones": sd,
         "phase1_complete": True,
@@ -836,6 +871,7 @@ def main():
     print("═" * 52)
     print(f"  Open  : {open_price}")
     print(f"  IV    : {iv_result['iv_pct']}%  [{iv_result['source']}]")
+    print(f"  DTE   : {dte}")
     print(f"  Daily%: {sd['daily_pct']}%   1SD: ±{sd['sd1_pts']} pts")
     print("─" * 52)
     for label, price in sd["zones"].items():
