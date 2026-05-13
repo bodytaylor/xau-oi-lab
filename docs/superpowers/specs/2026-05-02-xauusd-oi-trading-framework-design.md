@@ -1,4 +1,4 @@
-# XAUUSD OI Trading Framework — Full System Design
+# xau-oi-lab — Full System Design
 
 **Date:** 2026-05-02
 **Status:** Approved for implementation
@@ -69,7 +69,7 @@ longer the primary orchestrator.
 ## 3. New Files and Responsibilities
 
 ```
-xauusd_automation/
+xau-oi-lab/
 ├── server.py               FastAPI app — WebSocket, REST, APScheduler
 ├── signal_engine.py        Box trading signal calculator
 ├── pine_exporter.py        Pine Script generator

@@ -1,5 +1,5 @@
 """
-XAUUSD OI Trading Framework — Scheduler / Orchestrator
+xau-oi-lab — Scheduler / Orchestrator
 =======================================================
 Runs both phases on a schedule using APScheduler.
 Alternatively, use cron (see bottom of file).
@@ -109,11 +109,11 @@ if __name__ == "__main__":
 # ─────────────────────────────────────────────
 # Run `crontab -e` and add:
 #
-#   # XAUUSD Framework — Phase 1 at 01:30 WIB (UTC+7)
-#   30 18 * * 0-4  cd /path/to/xauusd_automation && python3 collector.py >> logs/phase1.log 2>&1
+#   # xau-oi-lab — Phase 1 at 01:30 WIB (UTC+7)
+#   30 18 * * 0-4  cd /path/to/xau-oi-lab && python3 collector.py >> logs/phase1.log 2>&1
 #
-#   # XAUUSD Framework — Phase 2 at 08:30 WIB (UTC+7)
-#   30  1 * * 1-5  cd /path/to/xauusd_automation && python3 oi_collector.py >> logs/phase2.log 2>&1
+#   # xau-oi-lab — Phase 2 at 08:30 WIB (UTC+7)
+#   30  1 * * 1-5  cd /path/to/xau-oi-lab && python3 oi_collector.py >> logs/phase2.log 2>&1
 #
 # Note: cron uses UTC by default on most Linux systems.
 # UTC+7 01:30 = UTC 18:30 previous day (Mon-Fri)

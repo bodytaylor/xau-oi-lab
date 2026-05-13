@@ -1,4 +1,4 @@
-# XAUUSD OI Trading Framework
+# xau-oi-lab
 
 Automated XAUUSD options-driven trading assistant. Scrapes CME open interest and implied volatility data, calculates standard deviation zones, generates Pine Script indicators, pushes them to TradingView Desktop, fires Discord alerts on zone entry, and stores session history in Supabase — all driven by a FastAPI server with a live HTML dashboard.
 
@@ -80,8 +80,8 @@ Both services are optional. The server starts and runs without them; alerts and 
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/bodytaylor/xauusd-automation.git
-cd xauusd-automation
+git clone https://github.com/bodytaylor/xau-oi-lab.git
+cd xau-oi-lab
 pip install -r requirements.txt
 python -m playwright install chromium
 ```
@@ -325,7 +325,7 @@ python push_pine.py --file exports/session_2026-05-03.pine
 ## Project Structure
 
 ```
-xauusd-automation/
+xau-oi-lab/
 ├── collector.py          # Phase 1 — investing.com + CME EOD IV scraper
 ├── oi_collector.py       # Phase 2 — CME intraday OI scraper
 ├── server.py             # FastAPI server (scheduler + WebSocket + REST)
