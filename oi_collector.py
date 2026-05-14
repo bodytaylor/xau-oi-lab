@@ -78,7 +78,7 @@ def make_context(pw):
 
 # ─── CME Navigation ───────────────────────────────────────────────────────────
 
-def navigate_to_intraday(page, open_price: float) -> tuple[list, list]:
+def navigate_to_intraday(page, open_price: float) -> tuple[list, list, str | None]:
     """Full navigation sequence to get Intraday OI data for Gold."""
     log.info("→ CME Vol2Vol (Gold, INTRADAY)")
     page.goto(CME_PAGE_URL, timeout=TIMEOUT, wait_until="domcontentloaded")
@@ -118,7 +118,7 @@ def navigate_to_intraday(page, open_price: float) -> tuple[list, list]:
     log.info(f"Vol curve points extracted: {len(vol_pts)}")
 
     ss(page, "cme_p2_extracted")
-    return oi_rows, vol_pts
+    return oi_rows, vol_pts, series_name
 
 
 def _get_frame(page):
@@ -913,11 +913,12 @@ def main():
         ctx = make_context(pw)
         page = ctx.new_page()
         try:
-            oi_rows, vol_pts = navigate_to_intraday(page, open_price)
+            oi_rows, vol_pts, series_name = navigate_to_intraday(page, open_price)
         except RuntimeError as e:
             log.error(str(e))
             oi_rows = _manual_entry()
             vol_pts = []
+            series_name = None
         finally:
             ctx.close()
 
