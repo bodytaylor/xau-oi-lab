@@ -8,8 +8,10 @@ let session  = null;
 let ws       = null;
 let wsRetries = 0;
 let lastPrice = null;
-let oiChart    = null;   // Chart.js instance — used to refresh price line on WS price
-let chartPrice = null;   // current price for the price-line plugin
+let eodChart      = null;  // Chart 1 — EOD Volume
+let intradayChart = null;  // Chart 2 — Intraday Volume
+let oiChart       = null;  // Chart 3 — Open Interest OI
+let chartPrice = null;   // current price for the price-line plugin (shared)
 let expiryMs   = null;   // option series expiry in Unix ms, computed once from session
 let expiryInterval = null;  // interval handle — cleared on re-run
 
@@ -107,76 +109,69 @@ const priceLinePlugin = {
   },
 };
 
-function renderOIChart() {
-  const panel = document.getElementById('oi-chart-panel');
-  if (!session?.oi_data?.length) {
-    // No Phase 2 data yet — show placeholder text, hide canvas
-    document.getElementById('oi-canvas').style.display = 'none';
-    if (!document.getElementById('oi-placeholder')) {
-      const ph = document.createElement('div');
-      ph.id            = 'oi-placeholder';
-      ph.style.cssText = 'color:var(--muted);font-size:12px;padding:20px 0';
-      ph.textContent   = 'Waiting for Phase 2\u2026';
-      panel.insertBefore(ph, document.getElementById('oi-chart-legend'));
-    }
-    return;
-  }
+/**
+ * Create or replace a Chart.js bar chart for volume/OI data.
+ * @param {string}  canvasId       - ID of the <canvas> element
+ * @param {Array}   oiData         - [{strike, volume, type, is_magnet}] rows
+ * @param {Array}   volCurvePoints - [{strike, iv}] for IV curve overlay (grouped only)
+ * @param {boolean} stacked        - If true, use stacked bars (OI chart)
+ * @param {Chart}   existing       - Previous Chart.js instance to destroy
+ * @returns {Chart|null}
+ */
+function makeBarChart(canvasId, oiData, volCurvePoints, stacked, existing) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  if (!oiData?.length) return null;
+  if (existing) { existing.destroy(); }
 
   const { strikes, callVols, putVols, magnets, ivCurve } =
-    buildChartData(session.oi_data, session.vol_curve_points);
+    buildChartData(oiData, volCurvePoints);
 
-  // Set initial price from session; WS updates will refresh via oiChart.update('none')
-  chartPrice = lastPrice || session.open_price || null;
-
-  // Bar colours — magnets are brighter + gold border
   const callBg  = strikes.map(s => magnets.includes(s) ? 'rgba(0,230,118,0.9)'  : 'rgba(0,200,83,0.65)');
   const putBg   = strikes.map(s => magnets.includes(s) ? 'rgba(255,82,82,0.9)'  : 'rgba(255,23,68,0.65)');
   const brdCol  = strikes.map(s => magnets.includes(s) ? '#e6b800' : 'transparent');
   const brdW    = strikes.map(s => magnets.includes(s) ? 2 : 0);
   const labels  = strikes.map(s => magnets.includes(s) ? `${s}\u2605` : String(s));
 
-  // IV axis bounds from actual data
-  const ivVals = ivCurve.filter(v => v !== null);
-  const ivMin  = ivVals.length ? Math.floor(Math.min(...ivVals)) - 2 : 20;
-  const ivMax  = ivVals.length ? Math.ceil(Math.max(...ivVals))  + 2 : 40;
+  const ivVals  = ivCurve.filter(v => v !== null);
+  const ivMin   = ivVals.length ? Math.floor(Math.min(...ivVals)) - 2 : 20;
+  const ivMax   = ivVals.length ? Math.ceil(Math.max(...ivVals))  + 2 : 40;
 
-  const canvas  = document.getElementById('oi-canvas');
-  canvas.width  = 600;
-  canvas.height = 600;
-  const ctx     = canvas.getContext('2d');
+  const barPct  = stacked ? 0.75 : 0.40;
+  const catPct  = stacked ? 0.85 : 0.60;
 
-  if (oiChart) {
-    oiChart.destroy();
-    oiChart = null;
+  const datasets = [
+    {
+      type: 'bar', label: 'Calls', data: callVols,
+      backgroundColor: callBg, borderColor: brdCol, borderWidth: brdW,
+      yAxisID: 'yContracts', barPercentage: barPct, categoryPercentage: catPct, order: 2,
+      ...(stacked ? { stack: 'stack0' } : {}),
+    },
+    {
+      type: 'bar', label: 'Puts', data: putVols,
+      backgroundColor: putBg, borderColor: brdCol, borderWidth: brdW,
+      yAxisID: 'yContracts', barPercentage: barPct, categoryPercentage: catPct, order: 2,
+      ...(stacked ? { stack: 'stack0' } : {}),
+    },
+  ];
+
+  if (!stacked) {
+    datasets.push({
+      type: 'line', label: 'IV %', data: ivCurve,
+      borderColor: '#e6b800', backgroundColor: 'rgba(230,184,0,0.05)',
+      pointBackgroundColor: '#e6b800', pointBorderColor: '#0d0d0d', pointBorderWidth: 1,
+      pointRadius: 3, pointHoverRadius: 5, borderWidth: 2, tension: 0.4, fill: false,
+      yAxisID: 'yIV', order: 1,
+      hidden: ivVals.length === 0,
+    });
   }
 
-  oiChart = new Chart(ctx, {
+  const ctx = canvas.getContext('2d');
+  const chart = new Chart(ctx, {
     plugins: [priceLinePlugin],
-    data: {
-      labels,
-      datasets: [
-        {
-          type: 'bar', label: 'Calls', data: callVols,
-          backgroundColor: callBg, borderColor: brdCol, borderWidth: brdW,
-          yAxisID: 'yContracts', barPercentage: 0.40, categoryPercentage: 0.60, order: 2,
-        },
-        {
-          type: 'bar', label: 'Puts', data: putVols,
-          backgroundColor: putBg, borderColor: brdCol, borderWidth: brdW,
-          yAxisID: 'yContracts', barPercentage: 0.40, categoryPercentage: 0.60, order: 2,
-        },
-        {
-          type: 'line', label: 'IV %', data: ivCurve,
-          borderColor: '#e6b800', backgroundColor: 'rgba(230,184,0,0.05)',
-          pointBackgroundColor: '#e6b800', pointBorderColor: '#0d0d0d', pointBorderWidth: 1,
-          pointRadius: 4, pointHoverRadius: 6, borderWidth: 2, tension: 0.4, fill: false,
-          yAxisID: 'yIV', order: 1,
-          hidden: ivVals.length === 0,
-        },
-      ],
-    },
+    data: { labels, datasets },
     options: {
-      responsive: false,
+      responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       layout: { padding: { bottom: 26 } },
@@ -184,7 +179,7 @@ function renderOIChart() {
         legend: { display: false },
         tooltip: {
           backgroundColor: '#1a1a2e', borderColor: '#2a2a4a', borderWidth: 1,
-          titleColor: '#aaa', bodyColor: '#e0e0e0', padding: 10,
+          titleColor: '#aaa', bodyColor: '#e0e0e0', padding: 8,
           callbacks: {
             title:  items => `Strike: ${items[0].label}`,
             label:  item  => item.dataset.label === 'IV %'
@@ -196,30 +191,85 @@ function renderOIChart() {
       scales: {
         x: {
           grid:  { color: 'rgba(255,255,255,0.03)' },
-          ticks: { color: '#555', font: { family: 'SF Mono, Consolas, monospace', size: 10 }, maxRotation: 0 },
+          ticks: { color: '#555', font: { family: 'SF Mono, Consolas, monospace', size: 9 }, maxRotation: 45 },
+          ...(stacked ? { stacked: true } : {}),
         },
         yContracts: {
           type: 'linear', position: 'left',
-          title: { display: true, text: 'Contracts (OI)', color: '#666', font: { size: 10, family: 'SF Mono, Consolas, monospace' } },
+          title: { display: true, text: 'Contracts', color: '#666', font: { size: 9, family: 'SF Mono, Consolas, monospace' } },
           grid:  { color: 'rgba(255,255,255,0.04)' },
-          ticks: { color: '#666', font: { size: 10, family: 'SF Mono, Consolas, monospace' },
+          ticks: { color: '#666', font: { size: 9, family: 'SF Mono, Consolas, monospace' },
                    callback: v => v >= 1000 ? (v / 1000).toFixed(1) + 'k' : v },
+          ...(stacked ? { stacked: true } : {}),
         },
-        yIV: {
-          type: 'linear', position: 'right',
-          display: ivVals.length > 0,
-          title: { display: true, text: 'Implied Volatility %', color: '#e6b800', font: { size: 10, family: 'SF Mono, Consolas, monospace' } },
-          grid:  { display: false },
-          ticks: { color: '#e6b800', font: { size: 10, family: 'SF Mono, Consolas, monospace' },
-                   callback: v => v.toFixed(1) + '%' },
-          min: ivMin, max: ivMax,
-        },
+        ...(stacked ? {} : {
+          yIV: {
+            type: 'linear', position: 'right',
+            display: ivVals.length > 0,
+            title: { display: true, text: 'IV %', color: '#e6b800', font: { size: 9, family: 'SF Mono, Consolas, monospace' } },
+            grid:  { display: false },
+            ticks: { color: '#e6b800', font: { size: 9, family: 'SF Mono, Consolas, monospace' },
+                     callback: v => v.toFixed(1) + '%' },
+            min: ivMin, max: ivMax,
+          },
+        }),
       },
     },
   });
 
-  // Attach strikes metadata for the price-line plugin to read
-  oiChart._oiMeta = { strikes };
+  chart._oiMeta = { strikes };
+  return chart;
+}
+
+/** Show a placeholder message when chart data is unavailable. */
+function showChartPlaceholder(panelId, canvasId, phId, msg) {
+  const canvas = document.getElementById(canvasId);
+  if (canvas) canvas.style.display = 'none';
+  const panel = document.getElementById(panelId);
+  if (panel && !document.getElementById(phId)) {
+    const ph = document.createElement('div');
+    ph.id = phId;
+    ph.style.cssText = 'color:var(--muted);font-size:11px;padding:16px 0;flex:1';
+    ph.textContent = msg;
+    const legend = panel.querySelector('.chart-panel-legend');
+    panel.insertBefore(ph, legend);
+  }
+}
+
+/** Hide placeholder and restore canvas when data arrives. */
+function hideChartPlaceholder(canvasId, phId) {
+  const canvas = document.getElementById(canvasId);
+  if (canvas) canvas.style.display = '';
+  const ph = document.getElementById(phId);
+  if (ph) ph.remove();
+}
+
+function renderAllCharts() {
+  chartPrice = lastPrice || session?.open_price || null;
+
+  // ── Chart 1: Volume EOD ──────────────────────────────────
+  if (!session?.eod_data?.length) {
+    showChartPlaceholder('eod-chart-panel', 'eod-canvas', 'eod-ph', 'Waiting for EOD data\u2026');
+  } else {
+    hideChartPlaceholder('eod-canvas', 'eod-ph');
+    eodChart = makeBarChart('eod-canvas', session.eod_data, session.vol_curve_points, false, eodChart);
+  }
+
+  // ── Chart 2: Volume Intraday (Phase 2 only) ──────────────
+  if (!session?.phase2_complete || !session?.oi_data?.length) {
+    showChartPlaceholder('intraday-chart-panel', 'intraday-canvas', 'intraday-ph', 'Waiting for Phase 2\u2026');
+  } else {
+    hideChartPlaceholder('intraday-canvas', 'intraday-ph');
+    intradayChart = makeBarChart('intraday-canvas', session.oi_data, session.vol_curve_points, false, intradayChart);
+  }
+
+  // ── Chart 3: Open Interest OI (Phase 2 only) ─────────────
+  if (!session?.phase2_complete || !session?.oi_interest_data?.length) {
+    showChartPlaceholder('oi-chart-panel', 'oi-canvas', 'oi-ph', 'Waiting for Phase 2\u2026');
+  } else {
+    hideChartPlaceholder('oi-canvas', 'oi-ph');
+    oiChart = makeBarChart('oi-canvas', session.oi_interest_data, session.vol_curve_points, true, oiChart);
+  }
 }
 
 function padZ(n) { return String(Math.floor(Math.abs(n))).padStart(2, '0'); }
@@ -233,7 +283,7 @@ function tick() {
   const rem   = Math.floor((expiryMs - Date.now()) / 1000);
   const chip  = document.getElementById('countdown-chip');
   const bar   = document.getElementById('expiry-bar');
-  const panel = document.getElementById('oi-chart-panel');
+  const panel = document.getElementById('charts-row');
   const expiresEl = document.getElementById('chart-expires');
   const seriesTag = session?.exp_series_name
     ? `GC ${session.exp_series_name}`
@@ -289,6 +339,18 @@ function startExpiryCountdown() {
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 
+async function refreshSession() {
+  try {
+    const resp = await fetch(`${API}/session`);
+    if (resp.ok) session = await resp.json();
+  } catch (_) {}
+  chartPrice = lastPrice || session?.open_price || null;
+  renderZoneMap();
+  renderOI();
+  renderAllCharts();
+  startExpiryCountdown();
+}
+
 async function init() {
   try {
     const resp = await fetch(`${API}/session`);
@@ -308,8 +370,8 @@ async function init() {
 
   renderZoneMap();
   renderOI();
-  renderOIChart();           // ← add this
-  startExpiryCountdown();    // ← add this
+  renderAllCharts();
+  startExpiryCountdown();
   connectWS();
 }
 
@@ -325,12 +387,20 @@ function connectWS() {
 
   ws.onmessage = (e) => {
     const d = JSON.parse(e.data);
+
+    // Phase completed — re-fetch full session and re-render all charts
+    if (d.type === 'session_updated') {
+      refreshSession();
+      return;
+    }
+
     if (d.price !== null && d.price !== undefined) {
       lastPrice  = d.price;
       chartPrice = d.price;                      // update price for plugin
       document.getElementById('live-price').textContent = d.price.toFixed(2);
       updatePriceDot(d.price);
-      if (oiChart) oiChart.update('none');       // redraw price line, no animation
+      // Redraw price line on all charts, no animation
+      [eodChart, intradayChart, oiChart].forEach(c => { if (c) c.update('none'); });
     }
     if (d.signal) renderSignal(d.signal);
     setDot('ws-dot', d.tv_online ? 'green' : 'amber');
@@ -399,11 +469,14 @@ function renderZoneMap() {
     const label = document.createElement('div');
     label.className = 'level-label';
     label.style.bottom = pct(z[key]);
-    label.textContent = `${key} ${z[key].toFixed(0)}`;
+    label.style.color = color;
+    label.textContent = `${key}  ${z[key].toFixed(1)}`;
     bar.appendChild(label);
   });
 
-  // OI magnets
+  // OI magnets — labels on left side.
+  // Note: if two magnets land within ~1% of the range apart, their labels will
+  // visually overlap. No collision avoidance is applied; rare in practice.
   const magnets = session.oi_analysis?.magnets || [];
   magnets.forEach(m => {
     const line = document.createElement('div');
@@ -412,6 +485,12 @@ function renderZoneMap() {
     line.style.background = '#2979ff';
     line.style.borderTop = '1px dotted #2979ff';
     bar.appendChild(line);
+
+    const label = document.createElement('div');
+    label.className = 'magnet-label';
+    label.style.bottom = pct(m);
+    label.textContent = `◆ ${m.toFixed(1)}`;
+    bar.appendChild(label);
   });
 
   // Price dot

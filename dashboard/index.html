@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>XAUUSD OI Dashboard</title>
-  <link rel="stylesheet" href="style.css?v=20260514c">
+  <link rel="stylesheet" href="style.css?v=20260514i">
 </head>
 <body>
 
@@ -16,7 +16,44 @@
     <div id="zone-bar"></div>
   </div>
 
-  <!-- CENTER: Signal -->
+  <!-- CENTER: Today's Bias + OI Analysis -->
+  <div class="panel" id="oi-panel">
+
+    <div id="bias-section">
+      <h3>Today's Bias</h3>
+      <div id="bias-verdict">—</div>
+      <div id="bias-detail"></div>
+    </div>
+
+    <div id="oi-section">
+      <h3>OI Analysis</h3>
+      <div class="skew" id="skew-text">—</div>
+
+      <div class="gauge-row">
+        <span style="color:var(--blue);width:40px">CALL</span>
+        <div class="gauge-bar"><div class="gauge-fill" id="call-fill" style="background:var(--blue);width:50%"></div></div>
+        <span id="call-pct-text">50%</span>
+      </div>
+      <div class="gauge-row">
+        <span style="color:var(--amber);width:40px">PUT</span>
+        <div class="gauge-bar"><div class="gauge-fill" id="put-fill" style="background:var(--amber);width:50%"></div></div>
+        <span id="put-pct-text">50%</span>
+      </div>
+
+      <h3 style="margin-top:12px">Magnets</h3>
+      <div id="magnet-list"></div>
+
+      <h3 style="margin-top:12px">Gamma Risk</h3>
+      <div id="gamma-list"></div>
+
+      <div style="margin-top:12px;color:var(--muted);font-size:10px" id="phase2-ts">
+        Phase 2: waiting…
+      </div>
+    </div>
+
+  </div>
+
+  <!-- RIGHT: Trade Signal -->
   <div class="panel" id="signal-panel">
     <h3>Trade Signal</h3>
     <div id="zone-badge">—</div>
@@ -35,62 +72,70 @@
     </div>
   </div>
 
-  <!-- RIGHT: OI Analysis -->
-  <div class="panel" id="oi-panel">
-
-    <!-- Today's Bias (combined OI + vol curve skew) -->
-    <h3>Today's Bias</h3>
-    <div id="bias-verdict">—</div>
-    <div id="bias-detail"></div>
-    <div class="panel-divider"></div>
-
-    <h3>OI Analysis</h3>
-    <div class="skew" id="skew-text">—</div>
-
-    <div class="gauge-row">
-      <span style="color:var(--blue);width:40px">CALL</span>
-      <div class="gauge-bar"><div class="gauge-fill" id="call-fill" style="background:var(--blue);width:50%"></div></div>
-      <span id="call-pct-text">50%</span>
-    </div>
-    <div class="gauge-row">
-      <span style="color:var(--amber);width:40px">PUT</span>
-      <div class="gauge-bar"><div class="gauge-fill" id="put-fill" style="background:var(--amber);width:50%"></div></div>
-      <span id="put-pct-text">50%</span>
-    </div>
-
-    <h3 style="margin-top:16px">Magnets</h3>
-    <div id="magnet-list"></div>
-
-    <h3 style="margin-top:16px">Gamma Risk</h3>
-    <div id="gamma-list"></div>
-
-    <div style="margin-top:16px;color:var(--muted);font-size:10px" id="phase2-ts">
-      Phase 2: waiting…
-    </div>
-  </div>
-
 </div>
 
-<!-- EOD OI CHART -->
-<div id="oi-chart-panel">
-  <div id="oi-chart-header">
-    <span id="chart-series-name" class="chart-series-name">—</span>
-    <span class="chart-type-tag">EOD OI</span>
-    <span class="chart-meta-sep">|</span>
-    <span class="chart-meta"><span class="chart-meta-k">Extracted</span>&nbsp;<span id="chart-extracted">—</span></span>
-    <span class="chart-meta-sep">|</span>
-    <span class="chart-meta"><span class="chart-meta-k">Expires</span>&nbsp;<span id="chart-expires">—</span></span>
-    <div id="countdown-chip" class="countdown-chip live">⏱ —</div>
+<!-- CHARTS ROW: Volume EOD | Volume Intraday | Open Interest OI -->
+<div id="charts-row">
+
+  <!-- 1. Volume EOD -->
+  <div class="chart-panel" id="eod-chart-panel">
+    <div class="chart-panel-hdr">
+      <span id="chart-series-name" class="chart-series-name">—</span>
+      <span class="chart-type-tag">Volume EOD</span>
+      <span class="chart-meta-sep">|</span>
+      <span class="chart-meta"><span class="chart-meta-k">Extracted</span>&nbsp;<span id="chart-extracted">—</span></span>
+      <span class="chart-meta-sep">|</span>
+      <span class="chart-meta"><span class="chart-meta-k">Expires</span>&nbsp;<span id="chart-expires">—</span></span>
+      <div id="countdown-chip" class="countdown-chip live">⏱ —</div>
+    </div>
+    <div class="chart-canvas-wrap">
+      <canvas id="eod-canvas"
+        role="img"
+        aria-label="EOD volume bar chart for XAUUSD options"></canvas>
+    </div>
+    <div class="chart-panel-legend">
+      <span class="leg"><span class="leg-bar" style="background:rgba(0,200,83,0.8)"></span>Calls</span>
+      <span class="leg"><span class="leg-bar" style="background:rgba(255,23,68,0.8)"></span>Puts</span>
+      <span class="leg"><span class="leg-line" style="background:#e6b800"></span>IV %</span>
+      <span class="leg"><span class="leg-dashed"></span>Current Price</span>
+    </div>
   </div>
-  <canvas id="oi-canvas" width="600" height="600"
-    role="img"
-    aria-label="End-of-day open interest bar chart for XAUUSD options"></canvas>
-  <div id="oi-chart-legend">
-    <span class="leg"><span class="leg-bar" style="background:rgba(0,200,83,0.8)"></span>Calls</span>
-    <span class="leg"><span class="leg-bar" style="background:rgba(255,23,68,0.8)"></span>Puts</span>
-    <span class="leg"><span class="leg-line" style="background:#e6b800"></span>IV %</span>
-    <span class="leg"><span class="leg-dashed"></span>Current Price</span>
+
+  <!-- 2. Volume Intraday -->
+  <div class="chart-panel" id="intraday-chart-panel">
+    <div class="chart-panel-hdr">
+      <span class="chart-type-tag" style="font-size:13px;color:var(--text)">Volume Intraday</span>
+    </div>
+    <div class="chart-canvas-wrap">
+      <canvas id="intraday-canvas"
+        role="img"
+        aria-label="Intraday volume bar chart for XAUUSD options"></canvas>
+    </div>
+    <div class="chart-panel-legend">
+      <span class="leg"><span class="leg-bar" style="background:rgba(0,200,83,0.8)"></span>Calls</span>
+      <span class="leg"><span class="leg-bar" style="background:rgba(255,23,68,0.8)"></span>Puts</span>
+      <span class="leg"><span class="leg-line" style="background:#e6b800"></span>IV %</span>
+      <span class="leg"><span class="leg-dashed"></span>Current Price</span>
+    </div>
   </div>
+
+  <!-- 3. Open Interest OI (stacked) -->
+  <div class="chart-panel" id="oi-chart-panel">
+    <div class="chart-panel-hdr">
+      <span class="chart-type-tag" style="font-size:13px;color:var(--text)">Open Interest OI</span>
+    </div>
+    <div class="chart-canvas-wrap">
+      <canvas id="oi-canvas"
+        role="img"
+        aria-label="Open interest bar chart for XAUUSD options"></canvas>
+    </div>
+    <div class="chart-panel-legend">
+      <span class="leg"><span class="leg-bar" style="background:rgba(0,200,83,0.8)"></span>Calls</span>
+      <span class="leg"><span class="leg-bar" style="background:rgba(255,23,68,0.8)"></span>Puts</span>
+      <span class="leg"><span class="leg-dashed"></span>Current Price</span>
+    </div>
+  </div>
+
 </div>
 
 <!-- BOTTOM BAR -->
@@ -103,6 +148,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="app.js?v=20260514c"></script>
+<script src="app.js?v=20260514i"></script>
 </body>
 </html>
