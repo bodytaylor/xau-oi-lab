@@ -101,7 +101,7 @@ def navigate_to_intraday(page, open_price: float) -> tuple[list, list]:
     _ensure_gold(frame, page)
 
     # Select nearest expiration (front month = default)
-    _select_expiration(frame, page)
+    series_name = _select_expiration(frame, page)
     page.wait_for_timeout(2000)
 
     # Switch to INTRADAY mode
@@ -191,20 +191,20 @@ def _select_expiration(frame, page):
     Date format in the popup is 'dd MMM yyyy' (e.g. '06 May 2026').
     Always opens the popup — the site auto-selects Friday's contract, which is wrong
     on days when a same-day expiry exists.
+    Returns the label text of the selected expiration, or None on failure.
     """
     target = target_exp_date()
     log.info(f"Target expiration date: {target}")
+    selected_label = None
     try:
         exp_link = frame.locator("#ctl00_ucSelector_hlExpiration").first
         if exp_link.count() == 0:
             log.warning("Expiration link not found")
-            return
+            return selected_label
         exp_link.click(timeout=10000)
         page.wait_for_timeout(1500)
         ss(page, "exp_popup")
 
-        # Search for a link whose text contains today's date.
-        # Pass target as an argument to avoid embedding it in a JS string literal.
         js_fn = """(target) => {
             const links = document.querySelectorAll('#ctl00_ucSelector_pnlExpirations a');
             for (const a of links) {
@@ -220,6 +220,7 @@ def _select_expiration(frame, page):
         if found:
             log.info(f"Expiration matched by date '{target}': {found} ✓")
             page.wait_for_timeout(2000)
+            selected_label = found
         else:
             log.warning(f"No expiration found for '{target}' — falling back to first link")
             first_exp = frame.locator("#ctl00_ucSelector_pnlExpirations a").first
@@ -229,14 +230,14 @@ def _select_expiration(frame, page):
                 first_exp.click(timeout=10000)
                 page.wait_for_timeout(2000)
                 log.info(f"Expiration {label} selected ✓")
+                selected_label = label
             else:
                 page.keyboard.press("Escape")
                 log.warning("No expiration links found in popup")
 
     except Exception as e:
         log.warning(f"_select_expiration: {e}")
-
-
+    return selected_label
 def _set_intraday(frame, page):
     """
     Switch to Intraday volume tab.
@@ -926,6 +927,8 @@ def main():
     vol_skew  = analyse_vol_curve(vol_pts, open_price) if vol_pts else None
 
     session.update({
+        "exp_series_name":   series_name or session.get("date", ""),
+        "vol_curve_points":  [{"strike": p["strike"], "iv": p["iv"]} for p in vol_pts],
         "oi_data":          oi_rows,
         "oi_analysis":      analysis,
         "vol_skew_analysis": vol_skew,
