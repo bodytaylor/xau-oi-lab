@@ -78,9 +78,12 @@ def make_context(pw):
 
 # ─── CME Navigation ───────────────────────────────────────────────────────────
 
-def navigate_to_intraday(page, open_price: float) -> tuple[list, list, str | None]:
-    """Full navigation sequence to get Intraday OI data for Gold."""
-    log.info("→ CME Vol2Vol (Gold, INTRADAY)")
+def navigate_to_intraday(page, open_price: float) -> tuple[list, list, list, str | None]:
+    """Phase 2 navigation: extract Intraday volume and Open Interest OI for Gold.
+    EOD volume is extracted by Phase 1 (collector.py) — not repeated here.
+    Returns (intraday_rows, oi_rows, vol_pts, series_name)
+    """
+    log.info("→ CME Vol2Vol (Gold, INTRADAY + OI)")
     page.goto(CME_PAGE_URL, timeout=TIMEOUT, wait_until="domcontentloaded")
     page.wait_for_timeout(8000)
 
@@ -104,21 +107,26 @@ def navigate_to_intraday(page, open_price: float) -> tuple[list, list, str | Non
     series_name = _select_expiration(frame, page)
     page.wait_for_timeout(2000)
 
-    # Switch to INTRADAY mode
+    # ── 1. Intraday Volume ────────────────────────────────────────────────
     _set_intraday(frame, page)
     page.wait_for_timeout(4000)
-
     ss(page, "cme_p2_intraday_set")
+    intraday_rows = _extract_bar_data(frame, page, open_price)
+    log.info(f"Intraday rows extracted: {len(intraday_rows)}")
 
-    # Extract bar chart data
-    oi_rows = _extract_bar_data(frame, page, open_price)
-
-    # Extract volatility curve (per-strike IV for skew analysis)
+    # Extract volatility curve while on Intraday tab (Vol Settle tooltips active)
     vol_pts = _extract_vol_curve(frame, page, open_price)
     log.info(f"Vol curve points extracted: {len(vol_pts)}")
 
+    # ── 2. Open Interest OI ───────────────────────────────────────────────
+    _set_oi(frame, page)
+    page.wait_for_timeout(4000)
+    ss(page, "cme_p2_oi_set")
+    oi_rows = _extract_bar_data(frame, page, open_price)
+    log.info(f"OI rows extracted: {len(oi_rows)}")
+
     ss(page, "cme_p2_extracted")
-    return oi_rows, vol_pts, series_name
+    return intraday_rows, oi_rows, vol_pts, series_name
 
 
 def _get_frame(page):
@@ -238,6 +246,112 @@ def _select_expiration(frame, page):
     except Exception as e:
         log.warning(f"_select_expiration: {e}")
     return selected_label
+
+
+def _set_oi(frame, page):
+    """
+    Switch to the Open Interest → OI view on CME Vol2Vol.
+    Attempts in order:
+      1. Direct ID click (naming pattern from EOD/Intraday tabs)
+      2. Two-step: click 'Open Interest' category link, then 'OI' sub-tab
+      3. Text-only match for an element whose full text is 'OI'
+    """
+    log.info("Switching to Open Interest OI...")
+
+    # Attempt 1: direct ID guesses (follow the lbEODVolume / lbIntradayVolume pattern)
+    for target_id in [
+        "MainContent_ucViewControl_IntegratedV2VExpectedRange_lbOpenInterest",
+        "MainContent_ucViewControl_IntegratedV2VExpectedRange_lbOI",
+        "MainContent_ucViewControl_IntegratedV2VExpectedRange_lbOpenInterestOI",
+    ]:
+        try:
+            btn = frame.locator(f"#{target_id}").first
+            if btn.count() > 0:
+                btn.click(timeout=8000)
+                log.info(f"OI tab clicked via ID ✓  ({target_id})")
+                page.wait_for_timeout(3000)
+                return
+        except Exception as e:
+            log.debug(f"ID {target_id}: {e}")
+
+    # Attempt 2: two-step — first click the 'Open Interest' category, then 'OI' sub-tab
+    clicked_cat = frame.evaluate("""() => {
+        for (const el of document.querySelectorAll('a,button,li,span,div,label')) {
+            const txt = (el.innerText || '').trim();
+            if (txt === 'Open Interest') { el.click(); return txt; }
+        }
+        return null;
+    }""")
+    if clicked_cat:
+        log.info(f"Clicked category: '{clicked_cat}'")
+        page.wait_for_timeout(1500)
+        clicked_tab = frame.evaluate("""() => {
+            for (const el of document.querySelectorAll('a,button,li,span,div')) {
+                const txt = (el.innerText || '').trim();
+                if (txt === 'OI' || txt === 'Open Interest') { el.click(); return txt; }
+            }
+            return null;
+        }""")
+        if clicked_tab:
+            log.info(f"Clicked OI sub-tab: '{clicked_tab}'")
+            page.wait_for_timeout(3000)
+            return
+
+    # Attempt 3: bare text match for 'OI'
+    result = frame.evaluate("""() => {
+        for (const el of document.querySelectorAll('a,button,li,span,div')) {
+            if (el.children.length === 0 && (el.innerText || '').trim() === 'OI') {
+                el.click();
+                return el.id || el.className || 'clicked';
+            }
+        }
+        return null;
+    }""")
+    if result:
+        log.info(f"OI set via text match: {result}")
+        page.wait_for_timeout(3000)
+    else:
+        log.warning("Could not locate Open Interest OI tab — proceeding without OI data")
+
+
+def _set_eod(frame, page):
+    """
+    Switch to EOD volume tab.
+    Element ID from DOM inspection (same tool as Phase 1):
+      #MainContent_ucViewControl_IntegratedV2VExpectedRange_lbEODVolume
+    """
+    log.info("Switching to EOD volume...")
+    target_id = "MainContent_ucViewControl_IntegratedV2VExpectedRange_lbEODVolume"
+
+    try:
+        btn = frame.locator(f"#{target_id}").first
+        if btn.count() > 0:
+            btn.click(timeout=10000)
+            log.info("EOD volume tab clicked ✓")
+            page.wait_for_timeout(3000)
+            return
+    except Exception as e:
+        log.debug(f"Direct ID click failed: {e}")
+
+    # Fallback: text match
+    result = frame.evaluate("""() => {
+        const all = document.querySelectorAll('a,button,li,span,div');
+        for (const el of all) {
+            if (el.children.length === 0 &&
+                el.innerText.trim().toLowerCase() === 'eod') {
+                el.click();
+                return el.id || el.className || 'clicked';
+            }
+        }
+        return null;
+    }""")
+    if result:
+        log.info(f"EOD set via text match: {result}")
+        page.wait_for_timeout(3000)
+    else:
+        log.warning("Could not locate EOD tab — proceeding (may be Intraday)")
+
+
 def _set_intraday(frame, page):
     """
     Switch to Intraday volume tab.
@@ -913,39 +1027,43 @@ def main():
         ctx = make_context(pw)
         page = ctx.new_page()
         try:
-            oi_rows, vol_pts, series_name = navigate_to_intraday(page, open_price)
+            intraday_rows, oi_rows, vol_pts, series_name = navigate_to_intraday(page, open_price)
         except RuntimeError as e:
             log.error(str(e))
-            oi_rows = _manual_entry()
+            intraday_rows = _manual_entry()
+            oi_rows = []
             vol_pts = []
             series_name = None
         finally:
             ctx.close()
 
-    oi_rows   = tag_rows(oi_rows)
-    analysis  = analyse(oi_rows)
-    vol_pts   = [p for p in vol_pts if p.get("iv") is not None]
-    vol_skew  = analyse_vol_curve(vol_pts, open_price) if vol_pts else None
+    intraday_rows = tag_rows(intraday_rows)
+    oi_rows       = tag_rows(oi_rows)
+    analysis      = analyse(intraday_rows)   # oi_analysis is based on intraday volume
+    vol_pts       = [p for p in vol_pts if p.get("iv") is not None]
+    vol_skew      = analyse_vol_curve(vol_pts, open_price) if vol_pts else None
 
+    # Preserve eod_data written by Phase 1 — Phase 2 does not overwrite it
     session.update({
         "exp_series_name":   series_name or session.get("date", ""),
         "vol_curve_points":  [{"strike": p["strike"], "iv": p["iv"]} for p in vol_pts],
-        "oi_data":          oi_rows,
-        "oi_analysis":      analysis,
+        "oi_data":           intraday_rows,      # Intraday Volume
+        "oi_interest_data":  oi_rows,            # Open Interest OI
+        "oi_analysis":       analysis,
         "vol_skew_analysis": vol_skew,
-        "phase2_complete":  True,
-        "phase2_at":        utc7_now().isoformat(),
+        "phase2_complete":   True,
+        "phase2_at":         utc7_now().isoformat(),
     })
     SESSION_FILE.write_text(json.dumps(session, indent=2))
 
-    # Pull vol_settle / futures_price from first row that has them
-    vol_settle    = next((r["vol_settle"]    for r in oi_rows if r.get("vol_settle")),    None)
-    futures_price = next((r["futures_price"] for r in oi_rows if r.get("futures_price")), None)
+    # Pull vol_settle / futures_price from intraday rows (vol curve sweep runs on intraday tab)
+    vol_settle    = next((r["vol_settle"]    for r in intraday_rows if r.get("vol_settle")),    None)
+    futures_price = next((r["futures_price"] for r in intraday_rows if r.get("futures_price")), None)
 
     print("\n" + "═"*52)
     print("  PHASE 2 LOCKED")
     print("═"*52)
-    print(f"  {len(oi_rows)} OI rows collected")
+    print(f"  {len(intraday_rows)} intraday rows  |  {len(oi_rows)} OI interest rows")
     if vol_settle is not None:
         print(f"  Vol Settle: {vol_settle}%")
     if futures_price is not None:

@@ -137,18 +137,6 @@ def fetch_open_price(page) -> float:
                 }
             return null;
         }""")),
-        ("table Open cell",  lambda: page.evaluate("""() => {
-            for (const td of document.querySelectorAll('td,th'))
-                if (td.innerText.trim().toLowerCase()==='open') {
-                    const n=td.nextElementSibling;
-                    return n?n.innerText.trim():null;
-                }
-            return null;
-        }""")),
-        ("body text scan",   lambda: page.evaluate("""() => {
-            const m=document.body.innerText.match(/Open[\\s\\S]{0,30}?([\\d,]{4,}\\.?\\d*)/i);
-            return m?m[1]:null;
-        }""")),
     ]:
         try:
             raw = fn()
@@ -179,7 +167,15 @@ def fetch_iv_from_cme(page, open_price: float) -> dict:
       - EOD tab : #MainContent_ucViewControl_IntegratedV2VExpectedRange_lbEODVolume
     """
     log.info("→ CME Vol2Vol (Gold, EOD)")
-    page.goto(CME_PAGE_URL, timeout=TIMEOUT, wait_until="domcontentloaded")
+    for _attempt in range(3):
+        try:
+            page.goto(CME_PAGE_URL, timeout=TIMEOUT, wait_until="domcontentloaded")
+            break
+        except Exception as e:
+            if _attempt == 2:
+                raise RuntimeError(f"CME page failed to load after 3 attempts: {e}") from e
+            log.warning(f"CME page.goto attempt {_attempt + 1} failed ({e}), retrying…")
+            page.wait_for_timeout(5000)
     page.wait_for_timeout(8000)
 
     # ── Login guard ────────────────────────────────────────────────────────
@@ -215,7 +211,12 @@ def fetch_iv_from_cme(page, open_price: float) -> dict:
     result = _extract_iv(frame, page, open_price)
     ss(page, "cme_iv_done")
     result["dte"] = _read_dte(frame)
-    return result
+
+    # ── Step E: Extract per-strike EOD bar data (while still on EOD tab) ──
+    eod_bars = _extract_eod_bars(frame, page, open_price)
+    ss(page, "cme_eod_bars_done")
+
+    return result, eod_bars
 
 
 def _is_login_page(page) -> bool:
@@ -618,6 +619,91 @@ def _parse_js_chart_data(raw_json: str, open_price: float) -> dict | None:
     return None
 
 
+def _extract_eod_bars(frame, page, open_price: float) -> list:
+    """
+    Extract per-strike EOD volume bars from the Highcharts chart.
+    Must be called while the tool is already on the EOD tab.
+    Returns tagged rows identical in structure to oi_collector's oi_data rows.
+    """
+    log.info("Extracting EOD bar chart data...")
+    hc = None
+    try:
+        hc = frame.evaluate("""() => {
+            if (!window.Highcharts?.charts) return null;
+            const chart = window.Highcharts.charts.find(c => c && c.series?.length > 0);
+            if (!chart) return null;
+            const xCats = chart.xAxis?.[0]?.categories || [];
+            const out = { series: [], xAxis: xCats };
+            chart.series.forEach(s => {
+                const pts = (s.data || []).map((pt, i) => ({
+                    x: pt.x ?? i,
+                    y: pt.y,
+                    category: xCats[pt.x ?? i] || pt.category,
+                    options: {
+                        strike: pt.options?.strike || pt.options?.custom?.strike,
+                        delta:  pt.options?.delta  || pt.options?.custom?.delta,
+                    },
+                }));
+                out.series.push({ name: s.name, color: s.color, data: pts });
+            });
+            return out;
+        }""")
+    except Exception as e:
+        log.debug(f"_extract_eod_bars eval: {e}")
+
+    if not hc:
+        log.warning("No Highcharts data on EOD tab — eod_data will be empty")
+        return []
+
+    rows = []
+    x_cats = hc.get("xAxis", [])
+    for series in hc.get("series", []):
+        name  = (series.get("name") or "").lower()
+        color = (series.get("color") or "").lower()
+        if "put" in name or "orange" in color or "#f5a623" in color:
+            opt_type = "put"
+        elif "call" in name or "blue" in color or "#2196" in color or color.startswith("#0"):
+            opt_type = "call"
+        else:
+            continue
+        for pt in series.get("data", []):
+            y = pt.get("y")
+            if not y or y <= 0:
+                continue
+            cat = pt.get("category") or (
+                x_cats[pt.get("x", 0)] if pt.get("x", 0) < len(x_cats) else None
+            )
+            strike = None
+            if cat:
+                m = re.search(r"(\d{3,})", str(cat))
+                if m:
+                    strike = float(m.group(1))
+            if not strike and pt.get("options", {}).get("strike"):
+                strike = float(pt["options"]["strike"])
+            if strike and strike > 0:
+                rows.append({
+                    "strike":     strike,
+                    "volume":     float(y),
+                    "type":       opt_type,
+                    "delta":      None,
+                    "source":     "highcharts_eod",
+                    "is_magnet":  False,
+                    "gamma_risk": False,
+                })
+
+    # Tag top-2 strikes by total volume as magnets
+    if rows:
+        vol_by_strike: dict = {}
+        for r in rows:
+            vol_by_strike[r["strike"]] = vol_by_strike.get(r["strike"], 0) + r["volume"]
+        top2 = set(sorted(vol_by_strike, key=vol_by_strike.get, reverse=True)[:2])
+        for r in rows:
+            r["is_magnet"] = r["strike"] in top2
+
+    log.info(f"EOD bars: {len(rows)} rows extracted")
+    return rows
+
+
 def _read_dte(frame) -> float | None:
     """
     Read DTE from the Vol2Vol chart title bar.
@@ -836,14 +922,15 @@ def main():
         finally:
             b1.close()
 
-        # ── IV from CME (persistent browser_profile session) ───────────────
+        # ── IV + EOD bars from CME (persistent browser_profile session) ────
         ctx2 = make_persistent_context(pw)
         try:
-            iv_result = fetch_iv_from_cme(ctx2.new_page(), open_price)
-        except RuntimeError as e:
+            iv_result, eod_bars = fetch_iv_from_cme(ctx2.new_page(), open_price)
+        except Exception as e:
             log.error(str(e))
             v = float(input(f">>> Manual IV% at {open_price:.0f}: ").strip())
             iv_result = {"iv_pct": v, "strike": open_price, "source": "manual"}
+            eod_bars = []
         finally:
             ctx2.close()
 
@@ -862,7 +949,9 @@ def main():
         "sd_zones": sd,
         "phase1_complete": True,
         "phase2_complete": False,
-        "oi_data": [],
+        "eod_data": eod_bars,           # from CME EOD tab — populated by Phase 1
+        "oi_data": [],                  # intraday volume — populated by Phase 2
+        "oi_interest_data": [],         # open interest  — populated by Phase 2
     }
     OUTPUT_FILE.write_text(json.dumps(payload, indent=2))
 

@@ -73,7 +73,15 @@ manager   = ConnectionManager()
 tv_client = TradingViewClient(cdp_port=settings.tv_cdp_port)
 scheduler = AsyncIOScheduler(timezone="Asia/Bangkok")
 
-_last_zone: str = ""  # dedup tracker for zone entry alerts
+_last_zone: str = ""                               # dedup tracker for zone entry alerts
+_main_loop: asyncio.AbstractEventLoop | None = None  # set in lifespan, used by sync phase runners
+
+
+def _broadcast_sync(data: dict):
+    """Broadcast a WebSocket message from a synchronous context (APScheduler thread)."""
+    if _main_loop and _main_loop.is_running():
+        asyncio.run_coroutine_threadsafe(manager.broadcast(data), _main_loop)
+        log.info(f"Broadcast → {data}")
 
 
 # ── Session helpers ───────────────────────────────────────────────────────────
@@ -156,6 +164,7 @@ def run_phase1():
     tv_client.create_sd_alerts(session["sd_zones"])
     db_sync.upsert_session(session)
     alerts.phase1_complete(session)
+    _broadcast_sync({"type": "session_updated", "phase": 1})
     log.info("Phase 1 complete ✓")
 
 
@@ -172,6 +181,7 @@ def run_phase2():
     subprocess.run([sys.executable, str(BASE / "push_pine.py"), "--latest"])
     db_sync.upsert_session(session)
     alerts.phase2_complete(session)
+    _broadcast_sync({"type": "session_updated", "phase": 2})
     log.info("Phase 2 complete ✓")
 
 
@@ -179,6 +189,8 @@ def run_phase2():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _main_loop
+    _main_loop = asyncio.get_running_loop()
     scheduler.add_job(
         run_phase1,
         CronTrigger(hour=1, minute=30, day_of_week="mon-fri", timezone="Asia/Bangkok"),
