@@ -8,6 +8,284 @@ let session  = null;
 let ws       = null;
 let wsRetries = 0;
 let lastPrice = null;
+let oiChart    = null;   // Chart.js instance — used to refresh price line on WS price
+let chartPrice = null;   // current price for the price-line plugin
+let expiryMs   = null;   // option series expiry in Unix ms, computed once from session
+let expiryInterval = null;  // interval handle — cleared on re-run
+
+// ── OI Chart helpers ───────────────────────────────────────────────────────
+
+/**
+ * Aggregates raw oi_data rows into chart-ready arrays.
+ * @param {Array}  oiData         - session.oi_data
+ * @param {Array}  volCurvePoints - session.vol_curve_points [{strike, iv}]
+ * @returns {{ strikes, callVols, putVols, magnets, ivCurve }}
+ */
+function buildChartData(oiData, volCurvePoints) {
+  const map = {};
+  for (const row of oiData) {
+    if (!map[row.strike]) map[row.strike] = { call: 0, put: 0, isMagnet: false };
+    if (row.type === 'call') map[row.strike].call += row.volume;
+    else                      map[row.strike].put  += row.volume;
+    if (row.is_magnet) map[row.strike].isMagnet = true;
+  }
+
+  const strikes  = Object.keys(map).map(Number).sort((a, b) => a - b);
+  const callVols = strikes.map(s => map[s].call);
+  const putVols  = strikes.map(s => map[s].put);
+  const magnets  = strikes.filter(s => map[s].isMagnet);
+
+  // Per-strike IV from vol_curve_points
+  const ivMap = {};
+  for (const p of (volCurvePoints || [])) ivMap[p.strike] = p.iv;
+  const ivCurve = strikes.map(s => ivMap[s] ?? null);
+
+  return { strikes, callVols, putVols, magnets, ivCurve };
+}
+
+/**
+ * Custom Chart.js plugin: draws a dashed vertical price line through the plot
+ * area and a frosted badge just below the x-axis showing the current price.
+ */
+const priceLinePlugin = {
+  id: 'priceLinePlugin',
+  afterDraw(chart) {
+    if (chartPrice === null) return;
+    const { strikes } = chart._oiMeta || {};
+    if (!strikes || strikes.length < 2) return;
+
+    // Interpolate price to a fractional x-index between two strikes
+    let xPos = null;
+    for (let i = 0; i < strikes.length - 1; i++) {
+      if (chartPrice >= strikes[i] && chartPrice <= strikes[i + 1]) {
+        xPos = i + (chartPrice - strikes[i]) / (strikes[i + 1] - strikes[i]);
+        break;
+      }
+    }
+    if (xPos === null) return;
+
+    const { ctx, chartArea: ca, scales } = chart;
+    const px = scales.x.getPixelForValue(xPos);
+
+    ctx.save();
+
+    // Dashed vertical line
+    ctx.beginPath();
+    ctx.setLineDash([6, 4]);
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth   = 1.5;
+    ctx.moveTo(px, ca.top);
+    ctx.lineTo(px, ca.bottom);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Price badge below chart, above tick labels
+    const label = `\u25bc ${chartPrice.toFixed(2)}`;
+    ctx.font     = 'bold 10px SF Mono, Consolas, monospace';
+    const tw     = ctx.measureText(label).width;
+    const bw     = tw + 12;
+    const bh     = 18;
+    const bx     = px - bw / 2;
+    const by     = ca.bottom + 4;
+
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 3);
+    else ctx.rect(bx, by, bw, bh);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth   = 1;
+    ctx.stroke();
+
+    ctx.fillStyle    = '#ffffff';
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, px, by + bh / 2);
+
+    ctx.restore();
+  },
+};
+
+function renderOIChart() {
+  const panel = document.getElementById('oi-chart-panel');
+  if (!session?.oi_data?.length) {
+    // No Phase 2 data yet — show placeholder text, hide canvas
+    document.getElementById('oi-canvas').style.display = 'none';
+    if (!document.getElementById('oi-placeholder')) {
+      const ph = document.createElement('div');
+      ph.id            = 'oi-placeholder';
+      ph.style.cssText = 'color:var(--muted);font-size:12px;padding:20px 0';
+      ph.textContent   = 'Waiting for Phase 2\u2026';
+      panel.insertBefore(ph, document.getElementById('oi-chart-legend'));
+    }
+    return;
+  }
+
+  const { strikes, callVols, putVols, magnets, ivCurve } =
+    buildChartData(session.oi_data, session.vol_curve_points);
+
+  // Set initial price from session; WS updates will refresh via oiChart.update('none')
+  chartPrice = lastPrice || session.open_price || null;
+
+  // Bar colours — magnets are brighter + gold border
+  const callBg  = strikes.map(s => magnets.includes(s) ? 'rgba(0,230,118,0.9)'  : 'rgba(0,200,83,0.65)');
+  const putBg   = strikes.map(s => magnets.includes(s) ? 'rgba(255,82,82,0.9)'  : 'rgba(255,23,68,0.65)');
+  const brdCol  = strikes.map(s => magnets.includes(s) ? '#e6b800' : 'transparent');
+  const brdW    = strikes.map(s => magnets.includes(s) ? 2 : 0);
+  const labels  = strikes.map(s => magnets.includes(s) ? `${s}\u2605` : String(s));
+
+  // IV axis bounds from actual data
+  const ivVals = ivCurve.filter(v => v !== null);
+  const ivMin  = ivVals.length ? Math.floor(Math.min(...ivVals)) - 2 : 20;
+  const ivMax  = ivVals.length ? Math.ceil(Math.max(...ivVals))  + 2 : 40;
+
+  const canvas  = document.getElementById('oi-canvas');
+  canvas.width  = 600;
+  canvas.height = 600;
+  const ctx     = canvas.getContext('2d');
+
+  if (oiChart) {
+    oiChart.destroy();
+    oiChart = null;
+  }
+
+  oiChart = new Chart(ctx, {
+    plugins: [priceLinePlugin],
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'bar', label: 'Calls', data: callVols,
+          backgroundColor: callBg, borderColor: brdCol, borderWidth: brdW,
+          yAxisID: 'yContracts', barPercentage: 0.40, categoryPercentage: 0.60, order: 2,
+        },
+        {
+          type: 'bar', label: 'Puts', data: putVols,
+          backgroundColor: putBg, borderColor: brdCol, borderWidth: brdW,
+          yAxisID: 'yContracts', barPercentage: 0.40, categoryPercentage: 0.60, order: 2,
+        },
+        {
+          type: 'line', label: 'IV %', data: ivCurve,
+          borderColor: '#e6b800', backgroundColor: 'rgba(230,184,0,0.05)',
+          pointBackgroundColor: '#e6b800', pointBorderColor: '#0d0d0d', pointBorderWidth: 1,
+          pointRadius: 4, pointHoverRadius: 6, borderWidth: 2, tension: 0.4, fill: false,
+          yAxisID: 'yIV', order: 1,
+          hidden: ivVals.length === 0,
+        },
+      ],
+    },
+    options: {
+      responsive: false,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      layout: { padding: { bottom: 26 } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1a1a2e', borderColor: '#2a2a4a', borderWidth: 1,
+          titleColor: '#aaa', bodyColor: '#e0e0e0', padding: 10,
+          callbacks: {
+            title:  items => `Strike: ${items[0].label}`,
+            label:  item  => item.dataset.label === 'IV %'
+              ? `  IV:    ${item.raw.toFixed(1)}%`
+              : `  ${item.dataset.label.padEnd(5)}: ${(item.raw || 0).toLocaleString()} contracts`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid:  { color: 'rgba(255,255,255,0.03)' },
+          ticks: { color: '#555', font: { family: 'SF Mono, Consolas, monospace', size: 10 }, maxRotation: 0 },
+        },
+        yContracts: {
+          type: 'linear', position: 'left',
+          title: { display: true, text: 'Contracts (OI)', color: '#666', font: { size: 10, family: 'SF Mono, Consolas, monospace' } },
+          grid:  { color: 'rgba(255,255,255,0.04)' },
+          ticks: { color: '#666', font: { size: 10, family: 'SF Mono, Consolas, monospace' },
+                   callback: v => v >= 1000 ? (v / 1000).toFixed(1) + 'k' : v },
+        },
+        yIV: {
+          type: 'linear', position: 'right',
+          display: ivVals.length > 0,
+          title: { display: true, text: 'Implied Volatility %', color: '#e6b800', font: { size: 10, family: 'SF Mono, Consolas, monospace' } },
+          grid:  { display: false },
+          ticks: { color: '#e6b800', font: { size: 10, family: 'SF Mono, Consolas, monospace' },
+                   callback: v => v.toFixed(1) + '%' },
+          min: ivMin, max: ivMax,
+        },
+      },
+    },
+  });
+
+  // Attach strikes metadata for the price-line plugin to read
+  oiChart._oiMeta = { strikes };
+}
+
+function padZ(n) { return String(Math.floor(Math.abs(n))).padStart(2, '0'); }
+function fmtDur(secs) {
+  const a = Math.abs(secs);
+  return `${padZ(a / 3600)}:${padZ((a % 3600) / 60)}:${padZ(a % 60)}`;
+}
+
+function tick() {
+  if (expiryMs === null) return;
+  const rem   = Math.floor((expiryMs - Date.now()) / 1000);
+  const chip  = document.getElementById('countdown-chip');
+  const bar   = document.getElementById('expiry-bar');
+  const panel = document.getElementById('oi-chart-panel');
+  const expiresEl = document.getElementById('chart-expires');
+  const seriesTag = session?.exp_series_name
+    ? `GC ${session.exp_series_name}`
+    : 'Series';
+  const t = fmtDur(rem);
+
+  if (rem > 0) {
+    chip.textContent  = `\u23f1 ${t}`;
+    chip.className    = 'countdown-chip live';
+    bar.textContent   = `\u23f1 ${seriesTag} expires in ${t}`;
+    bar.className     = 'expiry-bar live';
+    panel.classList.remove('expired');
+    if (expiresEl) expiresEl.classList.remove('expired');
+  } else {
+    chip.textContent  = `\u26a0 EXPIRED  ${t} ago`;
+    chip.className    = 'countdown-chip expired';
+    bar.textContent   = `\u26a0 ${seriesTag} expired ${t} ago`;
+    bar.className     = 'expiry-bar expired';
+    panel.classList.add('expired');
+    if (expiresEl) expiresEl.classList.add('expired');
+  }
+}
+
+function startExpiryCountdown() {
+  if (!session?.locked_at || !session?.dte) return;
+
+  // Compute once — same result on every page refresh
+  const lockedAtMs = new Date(session.locked_at).getTime();
+  expiryMs         = lockedAtMs + session.dte * 86400 * 1000;
+
+  // Populate static metadata labels (user's local time)
+  const fmtLocal = ms => new Date(ms).toLocaleString([], {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+
+  const seriesEl  = document.getElementById('chart-series-name');
+  const extractEl = document.getElementById('chart-extracted');
+  const expiresEl = document.getElementById('chart-expires');
+
+  if (seriesEl) {
+    seriesEl.textContent = session.exp_series_name
+      ? `GC \u00b7 ${session.exp_series_name}`
+      : `GC \u00b7 ${session.date}`;
+  }
+  if (extractEl) extractEl.textContent = fmtLocal(lockedAtMs);
+  if (expiresEl) expiresEl.textContent  = fmtLocal(expiryMs);
+
+  tick();                        // immediate first render
+  if (expiryInterval) clearInterval(expiryInterval);
+  expiryInterval = setInterval(tick, 1000);       // live tick every second
+}
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 
@@ -30,6 +308,8 @@ async function init() {
 
   renderZoneMap();
   renderOI();
+  renderOIChart();           // ← add this
+  startExpiryCountdown();    // ← add this
   connectWS();
 }
 
@@ -46,9 +326,11 @@ function connectWS() {
   ws.onmessage = (e) => {
     const d = JSON.parse(e.data);
     if (d.price !== null && d.price !== undefined) {
-      lastPrice = d.price;
+      lastPrice  = d.price;
+      chartPrice = d.price;                      // update price for plugin
       document.getElementById('live-price').textContent = d.price.toFixed(2);
       updatePriceDot(d.price);
+      if (oiChart) oiChart.update('none');       // redraw price line, no animation
     }
     if (d.signal) renderSignal(d.signal);
     setDot('ws-dot', d.tv_online ? 'green' : 'amber');

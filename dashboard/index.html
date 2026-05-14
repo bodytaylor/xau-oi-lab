@@ -71,14 +71,38 @@
 
 </div>
 
+<!-- EOD OI CHART -->
+<div id="oi-chart-panel">
+  <div id="oi-chart-header">
+    <span id="chart-series-name" class="chart-series-name">—</span>
+    <span class="chart-type-tag">EOD OI</span>
+    <span class="chart-meta-sep">|</span>
+    <span class="chart-meta"><span class="chart-meta-k">Extracted</span>&nbsp;<span id="chart-extracted">—</span></span>
+    <span class="chart-meta-sep">|</span>
+    <span class="chart-meta"><span class="chart-meta-k">Expires</span>&nbsp;<span id="chart-expires">—</span></span>
+    <div id="countdown-chip" class="countdown-chip live">⏱ —</div>
+  </div>
+  <canvas id="oi-canvas" width="600" height="600"
+    role="img"
+    aria-label="End-of-day open interest bar chart for XAUUSD options"></canvas>
+  <div id="oi-chart-legend">
+    <span class="leg"><span class="leg-bar" style="background:rgba(0,200,83,0.8)"></span>Calls</span>
+    <span class="leg"><span class="leg-bar" style="background:rgba(255,23,68,0.8)"></span>Puts</span>
+    <span class="leg"><span class="leg-line" style="background:#e6b800"></span>IV %</span>
+    <span class="leg"><span class="leg-dashed"></span>Current Price</span>
+  </div>
+</div>
+
 <!-- BOTTOM BAR -->
 <div id="bottom-bar">
   <div id="live-price">—</div>
   <span><span class="status-dot dot-grey" id="ws-dot"></span>TradingView</span>
   <span id="ts-label" style="color:var(--muted)">—</span>
+  <span id="expiry-bar" class="expiry-bar live">—</span>
   <a id="pine-link" href="#" target="_blank">📄 Pine Script</a>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
