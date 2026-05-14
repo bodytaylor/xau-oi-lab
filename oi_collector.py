@@ -218,14 +218,14 @@ def _select_expiration(frame, page):
         found = frame.evaluate(js_fn, target)
 
         if found:
-            log.info(f"Expiration matched by date '{target}': {found} ✓")
+            selected_label = " ".join(found.split())   # collapse internal whitespace
+            log.info(f"Expiration matched by date '{target}': {selected_label} ✓")
             page.wait_for_timeout(2000)
-            selected_label = found
         else:
             log.warning(f"No expiration found for '{target}' — falling back to first link")
             first_exp = frame.locator("#ctl00_ucSelector_pnlExpirations a").first
             if first_exp.count() > 0:
-                label = first_exp.inner_text(timeout=3000).strip()
+                label = " ".join(first_exp.inner_text(timeout=3000).split())
                 log.info(f"Selecting fallback expiration: {label}")
                 first_exp.click(timeout=10000)
                 page.wait_for_timeout(2000)

@@ -275,9 +275,9 @@ function startExpiryCountdown() {
   const expiresEl = document.getElementById('chart-expires');
 
   if (seriesEl) {
-    seriesEl.textContent = session.exp_series_name
-      ? `GC \u00b7 ${session.exp_series_name}`
-      : `GC \u00b7 ${session.date}`;
+    const rawName = session.exp_series_name || session.date || '';
+    const cleanName = rawName.replace(/\s+/g, ' ').trim();
+    seriesEl.textContent = `GC \u00b7 ${cleanName}`;
   }
   if (extractEl) extractEl.textContent = fmtLocal(lockedAtMs);
   if (expiresEl) expiresEl.textContent  = fmtLocal(expiryMs);
