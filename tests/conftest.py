@@ -48,6 +48,15 @@ SAMPLE_SESSION = {
         "verdict": "LEFT heavy — bearish vol skew",
         "point_count": 8,
     },
+    "exp_series_name": "06 May 2026",
+    "vol_curve_points": [
+        {"strike": 4550.0, "iv": 32.1},
+        {"strike": 4600.0, "iv": 30.5},
+        {"strike": 4650.0, "iv": 28.8},
+        {"strike": 4700.0, "iv": 27.2},
+        {"strike": 4750.0, "iv": 28.1},
+        {"strike": 4800.0, "iv": 30.4},
+    ],
 }
 
 
