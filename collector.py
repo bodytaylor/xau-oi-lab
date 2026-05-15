@@ -144,12 +144,18 @@ def fetch_open_price(page) -> float:
                 p = parse_float(raw)
                 if p and p > 500:
                     log.info(f"Open price [{desc}]: {p}")
-                    ss(page, "investing_open")
+                    try:
+                        ss(page, "investing_open")
+                    except Exception as sse:
+                        log.debug(f"Screenshot failed (non-fatal): {sse}")
                     return p
         except Exception as e:
             log.debug(f"[{desc}] {e}")
 
-    ss(page, "investing_FAILED")
+    try:
+        ss(page, "investing_FAILED")
+    except Exception:
+        pass
     raise RuntimeError("Could not extract open price — check screenshots/")
 
 
