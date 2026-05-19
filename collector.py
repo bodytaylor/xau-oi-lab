@@ -222,7 +222,10 @@ def fetch_iv_from_cme(page, open_price: float) -> dict:
     eod_bars = _extract_eod_bars(frame, page, open_price)
     ss(page, "cme_eod_bars_done")
 
-    return result, eod_bars
+    # ── Step F: Full vol curve sweep (while still on EOD tab) ─────────────
+    eod_vol_curve = _extract_eod_vol_curve(frame, page)
+
+    return result, eod_bars, eod_vol_curve
 
 
 def _is_login_page(page) -> bool:
@@ -710,6 +713,88 @@ def _extract_eod_bars(frame, page, open_price: float) -> list:
     return rows
 
 
+def _extract_eod_vol_curve(frame, page) -> list:
+    """
+    Full hover sweep across the EOD chart to collect per-strike IV.
+    Must be called while on the EOD tab.
+    Does not stop early — sweeps the entire chart width to capture all strikes.
+    Returns list of {strike, iv} sorted by strike, empty if unavailable.
+    """
+    log.info("Extracting EOD vol curve (full sweep)...")
+    try:
+        geo = frame.evaluate("""() => {
+            const chart = window.Highcharts?.charts?.find(c => c);
+            if (!chart) return null;
+            const ax  = chart.xAxis[0];
+            const svg = document.querySelector('svg.highcharts-root');
+            if (!svg) return null;
+            const r = svg.getBoundingClientRect();
+            return {
+                svgLeft:    r.left,
+                svgTop:     r.top,
+                plotLeft:   chart.plotLeft,
+                plotWidth:  chart.plotWidth,
+                plotTop:    chart.plotTop,
+                plotHeight: chart.plotHeight,
+                xMin:       ax.min,
+                xMax:       ax.max,
+            };
+        }""")
+        if not geo or geo.get("xMin") is None:
+            log.debug("EOD vol curve: Highcharts geometry unavailable")
+            return []
+
+        pts: dict = {}
+        steps = 60
+        for i in range(steps):
+            frac = i / (steps - 1)
+            cx = geo["svgLeft"] + geo["plotLeft"] + frac * geo["plotWidth"]
+            cy = geo["svgTop"]  + geo["plotTop"]  + geo["plotHeight"] * 0.40
+
+            frame.evaluate(f"""() => {{
+                const svg = document.querySelector('svg.highcharts-root');
+                if (svg) svg.dispatchEvent(new MouseEvent('mousemove', {{
+                    bubbles: true, cancelable: true,
+                    clientX: {cx}, clientY: {cy},
+                    view: window,
+                }}));
+            }}""")
+            page.wait_for_timeout(150)
+
+            hover_x = frame.evaluate("""() =>
+                window.Highcharts?.charts?.find(c => c)?.hoverPoint?.x ?? null
+            """)
+            vol = frame.evaluate("""() => {
+                let best = null;
+                for (const el of document.querySelectorAll('*')) {
+                    const txt = (el.innerText || '').trim();
+                    const m = txt.match(/Vol Settle:\\s*([\\d.]+)/);
+                    if (m && txt.length < 500) {
+                        if (best === null || txt.length < best.len)
+                            best = { val: parseFloat(m[1]), len: txt.length };
+                    }
+                }
+                return best ? best.val : null;
+            }""")
+
+            if hover_x is not None and vol is not None and 5.0 <= vol <= 200.0:
+                if hover_x not in pts or vol > pts[hover_x]:
+                    pts[hover_x] = vol
+                log.debug(f"  eod_curve {i:02d}: strike={hover_x}  vol={vol}%")
+
+        result = sorted(
+            [{"strike": s, "iv": v} for s, v in pts.items()],
+            key=lambda x: x["strike"],
+        )
+        preview = [f'{p["strike"]:.0f}={p["iv"]:.2f}' for p in result[:6]]
+        log.info(f"EOD vol curve: {len(result)} points — {preview}")
+        return result
+
+    except Exception as e:
+        log.debug(f"_extract_eod_vol_curve: {e}")
+        return []
+
+
 def _read_dte(frame) -> float | None:
     """
     Read DTE from the Vol2Vol chart title bar.
@@ -931,12 +1016,13 @@ def main():
         # ── IV + EOD bars from CME (persistent browser_profile session) ────
         ctx2 = make_persistent_context(pw)
         try:
-            iv_result, eod_bars = fetch_iv_from_cme(ctx2.new_page(), open_price)
+            iv_result, eod_bars, eod_vol_curve = fetch_iv_from_cme(ctx2.new_page(), open_price)
         except Exception as e:
             log.error(str(e))
             v = float(input(f">>> Manual IV% at {open_price:.0f}: ").strip())
             iv_result = {"iv_pct": v, "strike": open_price, "source": "manual"}
             eod_bars = []
+            eod_vol_curve = []
         finally:
             ctx2.close()
 
@@ -955,7 +1041,8 @@ def main():
         "sd_zones": sd,
         "phase1_complete": True,
         "phase2_complete": False,
-        "eod_data": eod_bars,           # from CME EOD tab — populated by Phase 1
+        "eod_data": eod_bars,               # from CME EOD tab — populated by Phase 1
+        "eod_vol_curve_points": eod_vol_curve,  # per-strike IV from EOD tab — Phase 1
         "oi_data": [],                  # intraday volume — populated by Phase 2
         "oi_interest_data": [],         # open interest  — populated by Phase 2
     }

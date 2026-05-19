@@ -252,7 +252,7 @@ function renderAllCharts() {
     showChartPlaceholder('eod-chart-panel', 'eod-canvas', 'eod-ph', 'Waiting for EOD data\u2026');
   } else {
     hideChartPlaceholder('eod-canvas', 'eod-ph');
-    eodChart = makeBarChart('eod-canvas', session.eod_data, session.vol_curve_points, false, eodChart);
+    eodChart = makeBarChart('eod-canvas', session.eod_data, session.eod_vol_curve_points || session.vol_curve_points, false, eodChart);
   }
 
   // ── Chart 2: Volume Intraday (Phase 2 only) ──────────────
