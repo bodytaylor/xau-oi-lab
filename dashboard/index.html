@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>XAUUSD OI Dashboard</title>
-  <link rel="stylesheet" href="style.css?v=20260514i">
+  <link rel="stylesheet" href="style.css?v=20260520a">
 </head>
 <body>
 
@@ -81,7 +81,7 @@
   <div class="chart-panel" id="eod-chart-panel">
     <div class="chart-panel-hdr">
       <span id="chart-series-name" class="chart-series-name">—</span>
-      <span class="chart-type-tag">Volume EOD</span>
+      <span class="chart-type-tag" style="font-size:13px;color:var(--text)">Volume EOD</span>
       <span class="chart-meta-sep">|</span>
       <span class="chart-meta"><span class="chart-meta-k">Extracted</span>&nbsp;<span id="chart-extracted">—</span></span>
       <span class="chart-meta-sep">|</span>
@@ -132,6 +132,7 @@
     <div class="chart-panel-legend">
       <span class="leg"><span class="leg-bar" style="background:rgba(0,200,83,0.8)"></span>Calls</span>
       <span class="leg"><span class="leg-bar" style="background:rgba(255,23,68,0.8)"></span>Puts</span>
+      <span class="leg"><span class="leg-line" style="background:#e6b800"></span>IV %</span>
       <span class="leg"><span class="leg-dashed"></span>Current Price</span>
     </div>
   </div>
@@ -148,6 +149,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="app.js?v=20260514i"></script>
+<script src="app.js?v=20260520a"></script>
 </body>
 </html>

@@ -268,7 +268,7 @@ function renderAllCharts() {
     showChartPlaceholder('oi-chart-panel', 'oi-canvas', 'oi-ph', 'Waiting for Phase 2\u2026');
   } else {
     hideChartPlaceholder('oi-canvas', 'oi-ph');
-    oiChart = makeBarChart('oi-canvas', session.oi_interest_data, session.vol_curve_points, true, oiChart);
+    oiChart = makeBarChart('oi-canvas', session.oi_interest_data, session.vol_curve_points, false, oiChart);
   }
 }
 
