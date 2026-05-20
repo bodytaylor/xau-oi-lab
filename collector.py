@@ -702,10 +702,10 @@ def _extract_eod_bars(frame, page, open_price: float) -> list:
 
     # Tag top-2 strikes by total volume as magnets
     if rows:
-        vol_by_strike: dict = {}
+        voly_strike: dict = {}
         for r in rows:
-            vol_by_strike[r["strike"]] = vol_by_strike.get(r["strike"], 0) + r["volume"]
-        top2 = set(sorted(vol_by_strike, key=vol_by_strike.get, reverse=True)[:2])
+            voly_strike[r["strike"]] = voly_strike.get(r["strike"], 0) + r["volume"]
+        top2 = set(sorted(voly_strike, key=voly_strike.get, reverse=True)[:2])
         for r in rows:
             r["is_magnet"] = r["strike"] in top2
 
@@ -837,8 +837,8 @@ def _hover_for_tooltip(frame, page, open_price: float) -> dict | None:
     (derived from the SVG element's getBoundingClientRect + the Highcharts
     plot-area geometry).
 
-    Fallback: sweep 60 synthetic events left→right and track the info-bar
-    Vol: value; pick the step with hoverPoint.x closest to the target.
+    Sweeps 60 synthetic mousemove events left→right and tracks the info-bar
+    Vol: value; returns the step with hoverPoint.x closest to the target.
     """
     target_strike = round(open_price / 5) * 5
     log.info(f"Hover — target strike: {target_strike}  (open={open_price:.2f})")
@@ -914,19 +914,7 @@ def _hover_for_tooltip(frame, page, open_price: float) -> dict | None:
                 window.Highcharts?.charts?.find(c => c)?.hoverPoint?.x ?? null
             """)
 
-        # ── Strategy A: dispatch at exact target pixel, wait, then read ─────
-        _dispatch(target_strike)
-        page.wait_for_timeout(400)          # let Highcharts callbacks fire
-        vol_a   = _read_vol()
-        hover_a = _read_hover_x()
-        log.info(f"Strategy A — hoverPoint.x={hover_a}  vol={vol_a}%")
-
-        if vol_a is not None and hover_a is not None and abs(hover_a - target_strike) < 5:
-            log.info(f"Hover A confirmed: strike={hover_a}  vol={vol_a}%")
-            return {"iv_pct": vol_a, "strike": float(hover_a), "source": "chart_hover"}
-
-        # ── Strategy B: sweep left→right, read hoverPoint.x after each step ─
-        log.info("Strategy A did not confirm target — running sweep")
+        # ── Sweep left→right, read hoverPoint.x after each step ─────────────
         steps = 60
         best  = None
 
@@ -936,19 +924,19 @@ def _hover_for_tooltip(frame, page, open_price: float) -> dict | None:
             page.wait_for_timeout(120)      # let callbacks fire between steps
 
             hover_x = _read_hover_x()
-            vol_b   = _read_vol()
+            vol   = _read_vol()
 
-            if vol_b is None or hover_x is None:
+            if vol is None or hover_x is None:
                 continue
 
             diff = abs(hover_x - open_price)
-            log.debug(f"  sweep {i:02d}: strike={hover_x}  vol={vol_b}%  diff={diff:.1f}")
+            log.debug(f"  sweep {i:02d}: strike={hover_x}  vol={vol}%  diff={diff:.1f}")
 
             if best is None or diff < best["diff"]:
-                best = {"iv_pct": vol_b, "strike": hover_x, "diff": diff}
+                best = {"iv_pct": vol, "strike": hover_x, "diff": diff}
 
             if diff < 2.5:
-                log.info(f"Sweep hit target: strike={hover_x}  vol={vol_b}%")
+                log.info(f"Sweep hit target: strike={hover_x}  vol={vol}%")
                 break
 
         if best:
