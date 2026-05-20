@@ -161,6 +161,7 @@ function makeBarChart(canvasId, oiData, volCurvePoints, stacked, existing) {
       borderColor: '#e6b800', backgroundColor: 'rgba(230,184,0,0.05)',
       pointBackgroundColor: '#e6b800', pointBorderColor: '#0d0d0d', pointBorderWidth: 1,
       pointRadius: 3, pointHoverRadius: 5, borderWidth: 2, tension: 0.4, fill: false,
+      spanGaps: true,
       yAxisID: 'yIV', order: 1,
       hidden: ivVals.length === 0,
     });
@@ -168,6 +169,7 @@ function makeBarChart(canvasId, oiData, volCurvePoints, stacked, existing) {
 
   const ctx = canvas.getContext('2d');
   const chart = new Chart(ctx, {
+    type: 'bar',
     plugins: [priceLinePlugin],
     data: { labels, datasets },
     options: {
@@ -183,7 +185,7 @@ function makeBarChart(canvasId, oiData, volCurvePoints, stacked, existing) {
           callbacks: {
             title:  items => `Strike: ${items[0].label}`,
             label:  item  => item.dataset.label === 'IV %'
-              ? `  IV:    ${item.raw.toFixed(1)}%`
+              ? (item.raw != null ? `  IV:    ${item.raw.toFixed(1)}%` : '  IV:    —')
               : `  ${item.dataset.label.padEnd(5)}: ${(item.raw || 0).toLocaleString()} contracts`,
           },
         },
@@ -252,7 +254,8 @@ function renderAllCharts() {
     showChartPlaceholder('eod-chart-panel', 'eod-canvas', 'eod-ph', 'Waiting for EOD data\u2026');
   } else {
     hideChartPlaceholder('eod-canvas', 'eod-ph');
-    eodChart = makeBarChart('eod-canvas', session.eod_data, session.eod_vol_curve_points || session.vol_curve_points, false, eodChart);
+    const eodCurve = session.eod_vol_curve_points?.length ? session.eod_vol_curve_points : session.vol_curve_points;
+    eodChart = makeBarChart('eod-canvas', session.eod_data, eodCurve, false, eodChart);
   }
 
   // ── Chart 2: Volume Intraday (Phase 2 only) ──────────────
