@@ -245,6 +245,31 @@ h3 {
 .dot-amber  { background: var(--amber); }
 .dot-grey   { background: var(--grey); }
 
+.offset-label {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.offset-input {
+  width: 72px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--amber);
+  font-family: 'SF Mono', Consolas, monospace;
+  font-size: 12px;
+  padding: 3px 6px;
+  text-align: right;
+  outline: none;
+  -moz-appearance: textfield;
+}
+.offset-input::-webkit-outer-spin-button,
+.offset-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.offset-input:focus { border-color: var(--amber); }
+
 #pine-link { margin-left: auto; color: var(--blue); text-decoration: none; font-size: 11px; }
 #pine-link:hover { text-decoration: underline; }
 

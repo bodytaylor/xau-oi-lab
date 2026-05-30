@@ -23,6 +23,8 @@ def generate_pine_script(session: dict) -> str:
     iv_pct  = session.get("iv_pct", 0)
     sd1_pts = sd["sd1_pts"]
 
+    offset_default = session.get("price_offset", 0.0)
+
     p3 = sd["zones"]["+3SD"]
     p2 = sd["zones"]["+2SD"]
     p1 = sd["zones"]["+1SD"]
@@ -94,7 +96,7 @@ indicator("XAUUSD SD Zones — {date}", overlay=true, max_lines_count=500, max_l
 //   Positive → futures trades above CFD  → lines shift DOWN on CFD chart
 //   Negative → futures trades below CFD  → lines shift UP   on CFD chart
 // OPEN and SD levels are not shifted (calculated from CFD open price).
-offset = input.float(0.0, title="Futures–CFD spread (futures − CFD)", step=0.01,
+offset = input.float({offset_default:.2f}, title="Futures–CFD spread (futures − CFD)", step=0.01,
      tooltip="Shifts box grid and OI magnet levels to align with the CFD chart price.\\nOPEN and SD levels are not shifted (calculated from CFD open price).")
 
 // ── Background zones ───────────────────────────────────────────────────

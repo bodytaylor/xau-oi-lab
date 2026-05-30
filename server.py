@@ -21,7 +21,7 @@ from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -35,6 +35,7 @@ import db_sync
 UTC7 = timezone(timedelta(hours=7))
 BASE = Path(__file__).parent
 SESSION_FILE = BASE / "session_data.json"
+OFFSET_FILE  = BASE / "price_offset.json"
 
 log = logging.getLogger("server")
 logging.basicConfig(
@@ -93,6 +94,15 @@ def _load_session() -> dict | None:
         return json.loads(SESSION_FILE.read_text())
     except Exception:
         return None
+
+
+def _load_offset() -> float:
+    if not OFFSET_FILE.exists():
+        return 0.0
+    try:
+        return float(json.loads(OFFSET_FILE.read_text()).get("offset", 0.0))
+    except Exception:
+        return 0.0
 
 
 # ── Price polling ─────────────────────────────────────────────────────────────
@@ -159,6 +169,7 @@ def run_phase1():
     session = _load_session()
     if not session:
         return
+    session["price_offset"] = _load_offset()
     export_pine(session)
     subprocess.run([sys.executable, str(BASE / "push_pine.py"), "--latest"])
     tv_client.create_sd_alerts(session["sd_zones"])
@@ -177,6 +188,7 @@ def run_phase2():
     session = _load_session()
     if not session:
         return
+    session["price_offset"] = _load_offset()
     export_pine(session)
     subprocess.run([sys.executable, str(BASE / "push_pine.py"), "--latest"])
     db_sync.upsert_session(session)
@@ -264,6 +276,22 @@ async def refresh_phase1():
 async def refresh_phase2():
     asyncio.create_task(asyncio.to_thread(run_phase2))
     return {"status": "triggered"}
+
+
+@app.get("/api/offset")
+async def get_offset():
+    return {"offset": _load_offset()}
+
+
+@app.post("/api/offset")
+async def set_offset(request: Request):
+    import math
+    body = await request.json()
+    offset = float(body.get("offset", 0.0))
+    if not math.isfinite(offset) or abs(offset) > 500:
+        return JSONResponse({"error": "offset out of range (must be finite, ±500)"}, status_code=422)
+    OFFSET_FILE.write_text(json.dumps({"offset": offset}))
+    return {"offset": offset}
 
 
 # ── Static dashboard ──────────────────────────────────────────────────────────

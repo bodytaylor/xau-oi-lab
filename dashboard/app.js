@@ -12,6 +12,7 @@ let eodChart      = null;  // Chart 1 — EOD Volume
 let intradayChart = null;  // Chart 2 — Intraday Volume
 let oiChart       = null;  // Chart 3 — Open Interest OI
 let chartPrice = null;   // current price for the price-line plugin (shared)
+let priceOffset = 0.0;   // Futures–CFD spread offset (futures − CFD)
 let expiryMs   = null;   // option series expiry in Unix ms, computed once from session
 let expiryInterval = null;  // interval handle — cleared on re-run
 
@@ -56,11 +57,15 @@ const priceLinePlugin = {
     const { strikes } = chart._oiMeta || {};
     if (!strikes || strikes.length < 2) return;
 
-    // Interpolate price to a fractional x-index between two strikes
+    // Apply Futures–CFD offset so the line aligns with futures strike prices
+    // (chart strikes = CME futures; live price = CFD → add offset to map to futures axis)
+    const displayPrice = chartPrice + priceOffset;
+
+    // Interpolate displayPrice to a fractional x-index between two strikes
     let xPos = null;
     for (let i = 0; i < strikes.length - 1; i++) {
-      if (chartPrice >= strikes[i] && chartPrice <= strikes[i + 1]) {
-        xPos = i + (chartPrice - strikes[i]) / (strikes[i + 1] - strikes[i]);
+      if (displayPrice >= strikes[i] && displayPrice <= strikes[i + 1]) {
+        xPos = i + (displayPrice - strikes[i]) / (strikes[i + 1] - strikes[i]);
         break;
       }
     }
@@ -82,7 +87,7 @@ const priceLinePlugin = {
     ctx.setLineDash([]);
 
     // Price badge below chart, above tick labels
-    const label = `\u25bc ${chartPrice.toFixed(2)}`;
+    const label = `\u25bc ${displayPrice.toFixed(2)}`;
     ctx.font     = 'bold 10px SF Mono, Consolas, monospace';
     const tw     = ctx.measureText(label).width;
     const bw     = tw + 12;
@@ -360,6 +365,17 @@ async function init() {
     if (resp.ok) session = await resp.json();
   } catch (_) {}
 
+  // Load saved Futures–CFD offset
+  try {
+    const resp = await fetch(`${API}/offset`);
+    if (resp.ok) {
+      const data = await resp.json();
+      priceOffset = data.offset || 0.0;
+      const input = document.getElementById('price-offset-input');
+      if (input) input.value = priceOffset;
+    }
+  } catch (_) {}
+
   // Pine Script link
   const today = new Date().toISOString().slice(0, 10);
   const pineLink = document.getElementById('pine-link');
@@ -375,6 +391,26 @@ async function init() {
   renderOI();
   renderAllCharts();
   startExpiryCountdown();
+
+  // Futures–CFD offset input handler
+  // Charts update immediately; server save is debounced to avoid mid-entry POSTs
+  let _offsetSaveTimer = null;
+  const offsetInput = document.getElementById('price-offset-input');
+  if (offsetInput) {
+    offsetInput.addEventListener('input', () => {
+      priceOffset = parseFloat(offsetInput.value) || 0.0;
+      [eodChart, intradayChart, oiChart].forEach(c => { if (c) c.update('none'); });
+      clearTimeout(_offsetSaveTimer);
+      _offsetSaveTimer = setTimeout(() => {
+        fetch(`${API}/offset`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ offset: priceOffset }),
+        }).catch(() => {});
+      }, 300);
+    });
+  }
+
   connectWS();
 }
 
