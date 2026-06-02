@@ -1,6 +1,28 @@
 """Shared utilities used by collector.py and oi_collector.py."""
 
+import json
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
+
+BASE_DIR            = Path(__file__).parent
+QUIKSTRIKE_URL_FILE = BASE_DIR / "quikstrike_url.json"
+
+
+def load_quikstrike_url() -> str:
+    """Return the user-saved QuikStrike chart URL, or empty string if not set."""
+    if not QUIKSTRIKE_URL_FILE.exists():
+        return ""
+    try:
+        return json.loads(QUIKSTRIKE_URL_FILE.read_text()).get("url", "")
+    except Exception:
+        return ""
+
+
+def is_login_page(page) -> bool:
+    """Return True if the page appears to be a CME login/sign-in wall."""
+    url   = page.url.lower()
+    title = page.title().lower()
+    return any(k in url or k in title for k in ["login", "signin", "sign-in", "log-in"])
 
 
 def utc7_now() -> datetime:

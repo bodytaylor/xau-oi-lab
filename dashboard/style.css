@@ -270,6 +270,46 @@ h3 {
 .offset-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .offset-input:focus { border-color: var(--amber); }
 
+.qs-url-input {
+  width: 260px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-family: 'SF Mono', Consolas, monospace;
+  font-size: 11px;
+  padding: 3px 6px;
+  outline: none;
+}
+.qs-url-input:focus { border-color: var(--blue); }
+.qs-save-btn {
+  background: var(--blue);
+  border: none;
+  border-radius: 4px;
+  color: #000;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.qs-save-btn:hover { opacity: 0.85; }
+.qs-save-btn.saved { background: var(--green); }
+
+.run-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.run-btn:hover { border-color: var(--blue); color: var(--blue); }
+.run-btn.running { border-color: var(--amber); color: var(--amber); }
+.run-btn.done    { border-color: var(--green); color: var(--green); }
+
 #pine-link { margin-left: auto; color: var(--blue); text-decoration: none; font-size: 11px; }
 #pine-link:hover { text-decoration: underline; }
 

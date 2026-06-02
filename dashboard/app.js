@@ -376,6 +376,16 @@ async function init() {
     }
   } catch (_) {}
 
+  // Load saved QuikStrike URL
+  try {
+    const resp = await fetch(`${API}/quikstrike-url`);
+    if (resp.ok) {
+      const data = await resp.json();
+      const urlInput = document.getElementById('quikstrike-url-input');
+      if (urlInput && data.url) urlInput.value = data.url;
+    }
+  } catch (_) {}
+
   // Pine Script link
   const today = new Date().toISOString().slice(0, 10);
   const pineLink = document.getElementById('pine-link');
@@ -408,6 +418,69 @@ async function init() {
           body: JSON.stringify({ offset: priceOffset }),
         }).catch(() => {});
       }, 300);
+    });
+  }
+
+  // Phase run buttons
+  function makeRunHandler(btnId, endpoint, label) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      btn.textContent = `⏳ ${label}…`;
+      btn.classList.add('running');
+      btn.disabled = true;
+      try {
+        await fetch(`${API}/${endpoint}`, { method: 'POST' });
+        btn.textContent = `⏳ ${label} running…`;
+        btn.classList.remove('running');
+        btn.classList.add('done');
+        setTimeout(() => {
+          btn.textContent = `▶ ${label}`;
+          btn.classList.remove('done');
+          btn.disabled = false;
+        }, 4000);
+      } catch (_) {
+        btn.textContent = `▶ ${label}`;
+        btn.classList.remove('running');
+        btn.disabled = false;
+      }
+    });
+  }
+  makeRunHandler('run-phase1-btn', 'refresh/phase1', 'Phase 1');
+  makeRunHandler('run-phase2-btn', 'refresh/phase2', 'Phase 2');
+
+  // QuikStrike URL save button
+  const qsSaveBtn = document.getElementById('quikstrike-url-save');
+  if (qsSaveBtn) {
+    qsSaveBtn.addEventListener('click', async () => {
+      const urlInput = document.getElementById('quikstrike-url-input');
+      const url = urlInput ? urlInput.value.trim() : '';
+      try {
+        const resp = await fetch(`${API}/quikstrike-url`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+        });
+        if (resp.ok) {
+          qsSaveBtn.textContent = 'Saved ✓';
+          qsSaveBtn.classList.add('saved');
+          setTimeout(() => {
+            qsSaveBtn.textContent = 'Save';
+            qsSaveBtn.classList.remove('saved');
+          }, 2000);
+        } else {
+          const data = await resp.json().catch(() => ({}));
+          qsSaveBtn.textContent = data.error || 'Error';
+          qsSaveBtn.style.background = 'var(--red, #f44)';
+          setTimeout(() => {
+            qsSaveBtn.textContent = 'Save';
+            qsSaveBtn.style.background = '';
+          }, 3000);
+        }
+      } catch (_) {
+        qsSaveBtn.textContent = 'Error';
+        setTimeout(() => { qsSaveBtn.textContent = 'Save'; }, 3000);
+      }
     });
   }
 

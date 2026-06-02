@@ -145,8 +145,13 @@
   <span><span class="status-dot dot-grey" id="ws-dot"></span>TradingView</span>
   <span id="ts-label" style="color:var(--muted)">—</span>
   <span id="expiry-bar" class="expiry-bar live">—</span>
+  <button id="run-phase1-btn" class="run-btn">▶ Phase 1</button>
+  <button id="run-phase2-btn" class="run-btn">▶ Phase 2</button>
   <label class="offset-label" for="price-offset-input">Spread&nbsp;(F−CFD)</label>
   <input type="number" id="price-offset-input" class="offset-input" value="0.00" step="0.01" placeholder="0.00">
+  <label class="offset-label" for="quikstrike-url-input">Chart URL</label>
+  <input type="url" id="quikstrike-url-input" class="qs-url-input" placeholder="Paste QuikStrike URL…" maxlength="500">
+  <button id="quikstrike-url-save" class="qs-save-btn">Save</button>
   <a id="pine-link" href="#" target="_blank">📄 Pine Script</a>
 </div>
 

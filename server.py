@@ -29,6 +29,7 @@ from config import settings
 from pine_exporter import run as export_pine
 from signal_engine import compute_signal
 from tradingview_client import TradingViewClient
+from utils import load_quikstrike_url, QUIKSTRIKE_URL_FILE
 import alerts
 import db_sync
 
@@ -103,6 +104,7 @@ def _load_offset() -> float:
         return float(json.loads(OFFSET_FILE.read_text()).get("offset", 0.0))
     except Exception:
         return 0.0
+
 
 
 # ── Price polling ─────────────────────────────────────────────────────────────
@@ -292,6 +294,28 @@ async def set_offset(request: Request):
         return JSONResponse({"error": "offset out of range (must be finite, ±500)"}, status_code=422)
     OFFSET_FILE.write_text(json.dumps({"offset": offset}))
     return {"offset": offset}
+
+
+@app.get("/api/quikstrike-url")
+async def get_quikstrike_url():
+    return {"url": load_quikstrike_url()}
+
+
+@app.post("/api/quikstrike-url")
+async def set_quikstrike_url(request: Request):
+    from urllib.parse import urlparse
+    body = await request.json()
+    url = str(body.get("url", "")).strip()
+    if url:
+        netloc = urlparse(url).netloc
+        if "quikstrike.net" not in netloc:
+            return JSONResponse(
+                {"error": "URL must be a cmegroup-tools.quikstrike.net URL"},
+                status_code=422,
+            )
+    QUIKSTRIKE_URL_FILE.write_text(json.dumps({"url": url}))
+    log.info(f"QuikStrike URL saved: {url[:80]}")
+    return {"url": url}
 
 
 # ── Static dashboard ──────────────────────────────────────────────────────────

@@ -19,13 +19,13 @@ import json, re, sys, logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-from utils import utc7_now, target_exp_date
+from utils import utc7_now, target_exp_date, load_quikstrike_url, is_login_page
 
-BASE_DIR       = Path(__file__).parent
-SESSION_FILE   = BASE_DIR / "session_data.json"
-CME_SESSION    = BASE_DIR / "cme_session.json"
-SCREENSHOT_DIR = BASE_DIR / "screenshots"
-PROFILE_DIR    = BASE_DIR / "browser_profile"
+BASE_DIR            = Path(__file__).parent
+SESSION_FILE        = BASE_DIR / "session_data.json"
+CME_SESSION         = BASE_DIR / "cme_session.json"
+SCREENSHOT_DIR      = BASE_DIR / "screenshots"
+PROFILE_DIR         = BASE_DIR / "browser_profile"
 
 CME_PAGE_URL = (
     "https://www.cmegroup.com/tools-information/quikstrike/vol2vol-expected-range.html"
@@ -84,24 +84,43 @@ def navigate_to_intraday(page, open_price: float) -> tuple[list, list, list, str
     Returns (intraday_rows, oi_rows, vol_pts, series_name)
     """
     log.info("→ CME Vol2Vol (Gold, INTRADAY + OI)")
-    page.goto(CME_PAGE_URL, timeout=TIMEOUT, wait_until="domcontentloaded")
-    page.wait_for_timeout(8000)
 
-    if "login" in page.url.lower() or "sign" in page.url.lower():
-        ss(page, "cme_login_wall")
-        raise RuntimeError("CME session expired — run login_setup.py")
-
-    ss(page, "cme_p2_loaded")
-
-    # Find the cmegroup-tools.quikstrike.net iframe (same as Phase 1)
-    frame = _get_frame(page)
-    if frame is None:
-        ss(page, "cme_no_iframe")
-        raise RuntimeError("QuikStrike iframe not found — check CME page loaded correctly")
-    log.info(f"Tool iframe URL: {frame.url}")
-
-    # Ensure Gold is selected (pid=40 in URL should handle this)
-    _ensure_gold(frame, page)
+    qs_url = load_quikstrike_url()
+    if qs_url:
+        # ── Direct URL mode: user provided the chart URL from the dashboard ──
+        log.info(f"Using saved QuikStrike URL: {qs_url[:80]}")
+        page.goto(qs_url, timeout=TIMEOUT, wait_until="domcontentloaded")
+        page.wait_for_timeout(5000)
+        if is_login_page(page):
+            ss(page, "cme_login_wall")
+            raise RuntimeError("CME session expired — run login_setup.py")
+        ss(page, "cme_p2_loaded")
+        # If the URL is the direct quikstrike.net tool page, the page IS the frame.
+        # If the user accidentally saved the outer CME wrapper URL, find the iframe.
+        if "cmegroup-tools.quikstrike.net" in page.url:
+            frame = page.main_frame
+        else:
+            frame = _get_frame(page)
+            if frame is None:
+                raise RuntimeError("QuikStrike iframe not found in saved URL page")
+        log.info(f"Direct frame URL: {frame.url[:80]}")
+        if "pid=40" not in frame.url:
+            log.warning("Saved URL may not be for Gold (pid=40 not in URL) — verify chart product")
+    else:
+        # ── Legacy mode: navigate via CME landing page ─────────────────────
+        log.info("No saved URL — navigating via CME landing page")
+        page.goto(CME_PAGE_URL, timeout=TIMEOUT, wait_until="domcontentloaded")
+        page.wait_for_timeout(8000)
+        if is_login_page(page):
+            ss(page, "cme_login_wall")
+            raise RuntimeError("CME session expired — run login_setup.py")
+        ss(page, "cme_p2_loaded")
+        frame = _get_frame(page)
+        if frame is None:
+            ss(page, "cme_no_iframe")
+            raise RuntimeError("QuikStrike iframe not found — check CME page loaded correctly")
+        log.info(f"Tool iframe URL: {frame.url}")
+        _ensure_gold(frame, page)
 
     # Select nearest expiration (front month = default)
     series_name = _select_expiration(frame, page)
@@ -154,7 +173,11 @@ def _get_frame(page):
 
 
 def _ensure_gold(frame, page):
-    """Navigate iframe to Gold (pid=40) — same approach as Phase 1."""
+    """
+    Navigate iframe to Gold (pid=40).
+    Primary approach: replace pid in the existing frame URL (preserves session tokens).
+    Fallback: human-simulated UI navigation — arrow → Metals → Gold (OC|GC).
+    """
     current_url = frame.url
     log.info(f"Current iframe URL: {current_url[:80]}")
 
@@ -162,33 +185,43 @@ def _ensure_gold(frame, page):
         log.info("Gold (pid=40) already selected ✓")
         return
 
-    # Replace pid in the existing frame URL (preserves session tokens)
-    gold_url = re.sub(r'\bpid=\d+', 'pid=40', current_url)
-    log.info("Navigating iframe to Gold (pid=40)...")
-    try:
-        frame.goto(gold_url, timeout=TIMEOUT, wait_until="domcontentloaded")
-        page.wait_for_timeout(3000)
-        log.info("Gold loaded via URL navigation ✓")
-        return
-    except Exception as e:
-        log.warning(f"Frame URL navigation failed ({e}), trying UI product selector...")
+    # Primary: navigate frame URL with pid=40 (only when a pid param exists)
+    if re.search(r'\bpid=\d+', current_url):
+        gold_url = re.sub(r'\bpid=\d+', 'pid=40', current_url)
+        log.info("Navigating iframe to Gold (pid=40)...")
+        try:
+            frame.goto(gold_url, timeout=TIMEOUT, wait_until="domcontentloaded")
+            page.wait_for_timeout(3000)
+            log.info("Gold loaded via URL navigation ✓")
+            return
+        except Exception as e:
+            log.warning(f"Frame URL navigation failed ({e}), trying UI product selector...")
+    else:
+        log.info("No pid param in URL — using UI product selector directly...")
 
-    # Fallback: click product selector UI
+    # Fallback: human-simulated product selector navigation
     try:
-        for sel in ["#ctl11_hlProductText", "#ctl11_hlProductArrow"]:
-            btn = frame.locator(sel).first
-            if btn.count() > 0:
-                btn.click(force=True)
-                page.wait_for_timeout(1000)
-                break
-        frame.locator('a[groupid="6"]').first.click(timeout=10000)
+        # Step 1: Click the ⌄ arrow to open the product selector popup
+        arrow = frame.locator("#ctl11_hlProductArrow")
+        arrow.wait_for(state="visible", timeout=10000)
+        arrow.click(force=True)
+        popup = frame.locator("#ctl11_ucProductSelectorPopup_pnlProductSelectorPopup")
+        popup.wait_for(state="visible", timeout=10000)
+        log.info("Product popup opened via arrow ✓")
+
+        # Step 2: Click Metals (groupid=6)
+        metals = frame.locator('a[groupid="6"]').first
+        metals.wait_for(state="visible", timeout=10000)
+        metals.click(timeout=10000)
         page.wait_for_timeout(1000)
-        precious = frame.locator('a[familyid]').filter(has_text=re.compile("precious", re.I)).first
-        precious.click(timeout=10000)
-        page.wait_for_timeout(1000)
-        frame.locator('a[productid="40"]').first.click(timeout=10000)
+        log.info("Metals selected ✓")
+
+        # Step 3: Click Gold directly (shown as Gold (OC|GC) in the list)
+        gold = frame.locator('a[productid="40"]').first
+        gold.wait_for(state="visible", timeout=10000)
+        gold.click(timeout=10000)
         page.wait_for_timeout(4000)
-        log.info("Gold selected via UI ✓")
+        log.info("Gold (OC|GC) selected via UI ✓")
     except Exception as e:
         log.warning(f"_ensure_gold UI fallback: {e}")
 
